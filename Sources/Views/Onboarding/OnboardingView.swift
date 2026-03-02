@@ -12,6 +12,8 @@ struct OnboardingView: View {
     @State private var ideExtensionInstalled = false
     @State private var ideExtensionError: String?
     @State private var mascotActivated = false
+    @State private var selectedPresetSlug: String? = nil
+    @State private var isLoadingPreset = false
 
     private let totalSteps = 5
 
@@ -226,7 +228,7 @@ struct OnboardingView: View {
         }
     }
 
-    // MARK: - Step 4: Activate Mascot
+    // MARK: - Step 4: Choose Mascot
 
     private var mascotStep: some View {
         VStack(spacing: 20) {
@@ -234,24 +236,32 @@ struct OnboardingView: View {
                      color: mascotActivated ? .green : Constants.orangePrimary)
 
             VStack(spacing: 8) {
-                Text("Meet your mascot")
+                Text("Choose your mascot")
                     .font(Constants.heading(size: 24, weight: .bold))
                     .foregroundStyle(Constants.textPrimary)
 
-                if let mascot = appStore.mascotStore.mascots.first {
-                    Text("Your \"\(mascot.name)\" mascot will appear on screen and react to Claude Code in real time.")
-                        .font(Constants.body(size: 14))
-                        .foregroundStyle(Constants.textMuted)
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 20)
-                } else {
-                    Text("You can add a mascot later from the Masko tab.")
-                        .font(Constants.body(size: 14))
-                        .foregroundStyle(Constants.textMuted)
-                        .multilineTextAlignment(.center)
+                Text("Pick a companion that will live on your screen and react to Claude Code.")
+                    .font(Constants.body(size: 14))
+                    .foregroundStyle(Constants.textMuted)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 20)
+            }
+
+            // Preset grid
+            LazyVGrid(columns: [
+                GridItem(.adaptive(minimum: 100, maximum: 130), spacing: 10)
+            ], spacing: 10) {
+                ForEach(MascotStore.presets) { preset in
+                    PresetPickerCard(
+                        preset: preset,
+                        isSelected: selectedPresetSlug == preset.slug
+                    ) {
+                        selectedPresetSlug = preset.slug
+                    }
                 }
             }
+            .padding(.horizontal, 20)
 
             if mascotActivated {
                 HStack(spacing: 6) {
@@ -261,17 +271,17 @@ struct OnboardingView: View {
                         .font(Constants.body(size: 14, weight: .medium))
                         .foregroundStyle(.green)
                 }
-            } else if appStore.mascotStore.mascots.first != nil {
-                primaryButton("Activate Mascot") {
-                    activateMascot()
-                }
-            }
 
-            if mascotActivated {
                 primaryButton("Let's go!") {
                     onComplete()
                 }
             } else {
+                primaryButton(isLoadingPreset ? "Loading..." : "Activate Mascot") {
+                    activateSelectedPreset()
+                }
+                .opacity(selectedPresetSlug == nil ? 0.5 : 1)
+                .allowsHitTesting(selectedPresetSlug != nil && !isLoadingPreset)
+
                 skipButton { onComplete() }
             }
         }
@@ -338,9 +348,82 @@ struct OnboardingView: View {
         }
     }
 
-    private func activateMascot() {
-        guard let mascot = appStore.mascotStore.mascots.first else { return }
-        overlayManager.showOverlayWithConfig(mascot.config)
-        mascotActivated = true
+    private func activateSelectedPreset() {
+        guard let slug = selectedPresetSlug else { return }
+        isLoadingPreset = true
+
+        Task {
+            await appStore.mascotStore.addPreset(slug: slug)
+
+            await MainActor.run {
+                isLoadingPreset = false
+                if let mascot = appStore.mascotStore.mascots.first(where: { $0.templateSlug == slug }) {
+                    overlayManager.showOverlayWithConfig(mascot.config)
+                    mascotActivated = true
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Preset Picker Card
+
+struct PresetPickerCard: View {
+    let preset: PresetInfo
+    let isSelected: Bool
+    let onTap: () -> Void
+
+    private var presetConfig: MaskoAnimationConfig? {
+        MascotStore.loadBundledConfig(named: preset.filename)
+    }
+
+    private var thumbnailURL: URL? {
+        guard let config = presetConfig,
+              let urlString = config.nodes.first?.transparentThumbnailUrl else { return nil }
+        return URL(string: urlString)
+    }
+
+    var body: some View {
+        Button(action: onTap) {
+            VStack(spacing: 6) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: Constants.cornerRadiusSmall)
+                        .fill(Constants.stage)
+
+                    if let url = thumbnailURL {
+                        AsyncImage(url: url) { phase in
+                            switch phase {
+                            case .success(let image):
+                                image
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fit)
+                            default:
+                                ProgressView()
+                                    .scaleEffect(0.6)
+                            }
+                        }
+                        .padding(8)
+                    } else {
+                        Image(systemName: "wand.and.stars")
+                            .font(.system(size: 24))
+                            .foregroundStyle(Constants.orangePrimary.opacity(0.5))
+                    }
+                }
+                .frame(height: 80)
+
+                Text("\(preset.emoji) \(presetConfig?.name ?? preset.slug)")
+                    .font(Constants.body(size: 12, weight: .medium))
+                    .foregroundStyle(Constants.textPrimary)
+                    .lineLimit(1)
+            }
+            .padding(8)
+            .background(isSelected ? Constants.orangePrimary.opacity(0.08) : Constants.surfaceWhite)
+            .clipShape(RoundedRectangle(cornerRadius: Constants.cornerRadius))
+            .overlay(
+                RoundedRectangle(cornerRadius: Constants.cornerRadius)
+                    .stroke(isSelected ? Constants.orangePrimary : Constants.border, lineWidth: isSelected ? 2 : 1)
+            )
+        }
+        .buttonStyle(.plain)
     }
 }

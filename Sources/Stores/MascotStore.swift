@@ -5,6 +5,17 @@ struct SavedMascot: Identifiable, Codable {
     let name: String
     var config: MaskoAnimationConfig
     let addedAt: Date
+    var templateSlug: String?
+}
+
+// MARK: - Preset Info
+
+struct PresetInfo: Identifiable {
+    let slug: String
+    let filename: String // bundle resource name (no .json)
+    let emoji: String
+
+    var id: String { slug }
 }
 
 @Observable
@@ -12,7 +23,22 @@ final class MascotStore {
     private(set) var mascots: [SavedMascot] = []
     private static let filename = "mascots.json"
 
-    private static let seedVersion = 3 // Bump to re-apply default config on next launch
+    private static let seedVersion = 4 // Bump to re-apply default config on next launch
+
+    /// The 5 base mascot presets. Replace placeholder entries with real configs when ready.
+    static let presets: [PresetInfo] = [
+        PresetInfo(slug: "madame-patate", filename: "madame-patate", emoji: "🥔"),
+        PresetInfo(slug: "otto", filename: "otto", emoji: "🐙"),
+        PresetInfo(slug: "cupidon", filename: "cupidon", emoji: "💘"),
+        PresetInfo(slug: "spark", filename: "spark", emoji: "⚡"),
+        PresetInfo(slug: "rusty", filename: "rusty", emoji: "🤖"),
+    ]
+
+    /// Presets not yet added by the user.
+    var availablePresets: [PresetInfo] {
+        let addedSlugs = Set(mascots.compactMap(\.templateSlug))
+        return Self.presets.filter { !addedSlugs.contains($0.slug) }
+    }
 
     init() {
         mascots = LocalStorage.load([SavedMascot].self, from: Self.filename) ?? []
@@ -24,48 +50,51 @@ final class MascotStore {
     }
 
     private func seedDefaults() {
-        // Try fetching from masko.ai first, fall back to bundled JSON
+        // Seed the first preset for new users
+        let firstPreset = Self.presets[0]
         Task {
-            if let config = await Self.fetchRemoteConfig() {
+            if let config = await Self.fetchRemoteConfig(slug: firstPreset.slug) {
                 await MainActor.run {
-                    self.add(config: config)
+                    self.addFromPreset(config: config, slug: firstPreset.slug)
                     UserDefaults.standard.set(Self.seedVersion, forKey: "defaultMascotSeedVersion")
                 }
                 return
             }
             // Offline fallback: load from bundle
             await MainActor.run {
-                guard let config = Self.loadBundledConfig() else { return }
-                self.add(config: config)
+                guard let config = Self.loadBundledConfig(named: firstPreset.filename) else { return }
+                self.addFromPreset(config: config, slug: firstPreset.slug)
                 UserDefaults.standard.set(Self.seedVersion, forKey: "defaultMascotSeedVersion")
             }
         }
     }
 
-    private static func fetchRemoteConfig() async -> MaskoAnimationConfig? {
-        guard let url = URL(string: "\(Constants.maskoBaseURL)/api/mascot-templates/masko") else { return nil }
+    static func fetchRemoteConfig(slug: String) async -> MaskoAnimationConfig? {
+        guard let url = URL(string: "\(Constants.maskoBaseURL)/api/mascot-templates/\(slug)") else { return nil }
         guard let (data, response) = try? await URLSession.shared.data(from: url),
               (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
         return try? JSONDecoder().decode(MaskoAnimationConfig.self, from: data)
     }
 
-    /// Re-apply the default mascot config when the seed version is bumped (e.g. condition fixes).
+    /// Re-apply bundled configs when the seed version is bumped (e.g. condition fixes).
     private func migrateSeedIfNeeded() {
         let current = UserDefaults.standard.integer(forKey: "defaultMascotSeedVersion")
         guard current < Self.seedVersion else { return }
-        guard let config = Self.loadBundledConfig() else { return }
 
-        // Match either old name or new name
-        if let idx = mascots.firstIndex(where: { $0.name == config.name || $0.name == "claude code test" }) {
-            mascots[idx].config = config
-            persist()
-            print("[masko-desktop] Default mascot config updated to seed v\(Self.seedVersion)")
+        // Update any existing preset mascots with fresh bundled configs
+        for preset in Self.presets {
+            guard let config = Self.loadBundledConfig(named: preset.filename) else { continue }
+            if let idx = mascots.firstIndex(where: { $0.templateSlug == preset.slug }) {
+                mascots[idx].config = config
+            }
         }
+        persist()
+
         UserDefaults.standard.set(Self.seedVersion, forKey: "defaultMascotSeedVersion")
     }
 
-    private static func loadBundledConfig() -> MaskoAnimationConfig? {
-        guard let url = Bundle.module.url(forResource: "claude-code-default", withExtension: "json", subdirectory: "Defaults"),
+    static func loadBundledConfig(named filename: String) -> MaskoAnimationConfig? {
+        guard let url = Bundle.module.url(forResource: filename, withExtension: "json", subdirectory: "Defaults"),
               let data = try? Data(contentsOf: url),
               let config = try? JSONDecoder().decode(MaskoAnimationConfig.self, from: data) else { return nil }
         return config
@@ -75,12 +104,50 @@ final class MascotStore {
         LocalStorage.save(mascots, to: Self.filename)
     }
 
+    // MARK: - Preset Management
+
+    /// Add a preset mascot by slug. Tries remote fetch first, falls back to bundled JSON.
+    func addPreset(slug: String) async {
+        // Already have this preset?
+        guard !mascots.contains(where: { $0.templateSlug == slug }) else { return }
+
+        // Try remote first
+        if let config = await Self.fetchRemoteConfig(slug: slug) {
+            await MainActor.run {
+                addFromPreset(config: config, slug: slug)
+            }
+            return
+        }
+
+        // Fall back to bundled
+        let filename = Self.presets.first(where: { $0.slug == slug })?.filename ?? slug
+        await MainActor.run {
+            guard let config = Self.loadBundledConfig(named: filename) else { return }
+            addFromPreset(config: config, slug: slug)
+        }
+    }
+
+    private func addFromPreset(config: MaskoAnimationConfig, slug: String) {
+        let mascot = SavedMascot(
+            id: UUID(),
+            name: config.name,
+            config: config,
+            addedAt: Date(),
+            templateSlug: slug
+        )
+        mascots.insert(mascot, at: 0)
+        persist()
+    }
+
+    // MARK: - General Management
+
     func add(config: MaskoAnimationConfig) {
         let mascot = SavedMascot(
             id: UUID(),
             name: config.name,
             config: config,
-            addedAt: Date()
+            addedAt: Date(),
+            templateSlug: nil
         )
         mascots.insert(mascot, at: 0)
         persist()

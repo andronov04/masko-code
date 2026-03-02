@@ -399,37 +399,47 @@ struct MaskoDashboardView: View {
                 .buttonStyle(.plain)
             }
 
-            Text("Paste config JSON from the canvas export, or use a preset")
+            Text("Paste config JSON from the canvas export, or add a preset")
                 .font(Constants.body(size: 13))
                 .foregroundColor(Constants.textMuted)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             // Preset buttons
-            HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text("Presets")
                     .font(Constants.body(size: 12, weight: .medium))
                     .foregroundColor(Constants.textMuted)
 
-                Button(action: loadClaudeCodeDefault) {
-                    HStack(spacing: 4) {
-                        Text("💻")
-                            .font(.system(size: 11))
-                        Text("Claude Code")
-                            .font(Constants.body(size: 12, weight: .medium))
+                let available = appStore.mascotStore.availablePresets
+                if available.isEmpty {
+                    Text("All presets added")
+                        .font(Constants.body(size: 12))
+                        .foregroundColor(Constants.textMuted.opacity(0.6))
+                } else {
+                    HStack(spacing: 8) {
+                        ForEach(available) { preset in
+                            Button(action: { addPresetDirectly(preset) }) {
+                                HStack(spacing: 4) {
+                                    Text(preset.emoji)
+                                        .font(.system(size: 11))
+                                    Text(MascotStore.loadBundledConfig(named: preset.filename)?.name ?? preset.slug)
+                                        .font(Constants.body(size: 12, weight: .medium))
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(Color(red: 139/255, green: 92/255, blue: 246/255).opacity(0.1))
+                                .foregroundColor(Color(red: 139/255, green: 92/255, blue: 246/255))
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .stroke(Color(red: 139/255, green: 92/255, blue: 246/255).opacity(0.3), lineWidth: 1)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        Spacer()
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(Color(red: 139/255, green: 92/255, blue: 246/255).opacity(0.1))
-                    .foregroundColor(Color(red: 139/255, green: 92/255, blue: 246/255))
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(Color(red: 139/255, green: 92/255, blue: 246/255).opacity(0.3), lineWidth: 1)
-                    )
                 }
-                .buttonStyle(.plain)
-
-                Spacer()
             }
 
             NativeTextEditor(text: $jsonText, placeholder: "Paste JSON here...")
@@ -461,15 +471,15 @@ struct MaskoDashboardView: View {
 
     // MARK: - Actions
 
-    private func loadClaudeCodeDefault() {
-        guard let url = Bundle.module.url(forResource: "claude-code-default", withExtension: "json", subdirectory: "Defaults"),
-              let data = try? Data(contentsOf: url),
-              let json = String(data: data, encoding: .utf8) else {
-            parseError = "Could not load default config"
-            return
+    private func addPresetDirectly(_ preset: PresetInfo) {
+        Task {
+            await appStore.mascotStore.addPreset(slug: preset.slug)
+            await MainActor.run {
+                showingAddSheet = false
+                jsonText = ""
+                parseError = nil
+            }
         }
-        jsonText = json
-        parseError = nil
     }
 
     private func addMascot() {
