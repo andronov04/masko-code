@@ -2,7 +2,7 @@
   <img src="Sources/Resources/Images/app-icon.png" width="128" />
 </p>
 
-<h1 align="center">Masko for Claude Code</h1>
+<h1 align="center">Masko Code</h1>
 
 <p align="center">
   A living mascot that floats above your windows, reacts to Claude Code, and lets you handle everything without leaving your flow.

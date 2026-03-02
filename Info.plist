@@ -7,13 +7,13 @@
     <key>CFBundleIdentifier</key>
     <string>com.masko.desktop</string>
     <key>CFBundleName</key>
-    <string>Masko for Claude Code</string>
+    <string>Masko Code</string>
     <key>CFBundleDisplayName</key>
-    <string>Masko for Claude Code</string>
+    <string>Masko Code</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>2</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.0</string>
+    <string>0.1.1</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>LSMinimumSystemVersion</key>
