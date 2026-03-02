@@ -98,9 +98,9 @@ final class AppStore {
         guard !isRunning else { return }
         isRunning = true
         do {
-            try HookInstaller.ensureScriptExists()
+            try HookInstaller.install()
         } catch {
-            print("[masko-desktop] Failed to create hook script: \(error)")
+            print("[masko-desktop] Failed to install hooks: \(error)")
         }
 
         // Evict cached videos older than 30 days
