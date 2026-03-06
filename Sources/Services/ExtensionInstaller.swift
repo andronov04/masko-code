@@ -84,6 +84,24 @@ enum ExtensionInstaller {
 
     // MARK: - Public API
 
+    /// Bundled extension version — bump this when updating the VSIX
+    static let bundledVersion = "1.0.0"
+
+    /// Re-install the extension if the bundled version is newer than what was last installed.
+    /// Called on app launch to ensure updates propagate automatically.
+    static func upgradeIfNeeded() {
+        let lastInstalled = UserDefaults.standard.string(forKey: "ideExtensionVersion") ?? "0"
+        guard bundledVersion.compare(lastInstalled, options: .numeric) == .orderedDescending else { return }
+        DispatchQueue.global(qos: .utility).async {
+            do {
+                try install()
+                UserDefaults.standard.set(bundledVersion, forKey: "ideExtensionVersion")
+            } catch {
+                print("[masko-desktop] Extension upgrade failed: \(error)")
+            }
+        }
+    }
+
     /// Check if the extension is installed in any detected IDE
     static func isInstalled() -> Bool {
         for ide in ideConfigs {

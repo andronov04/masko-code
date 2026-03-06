@@ -26,7 +26,7 @@ private enum OverlayStyle {
 
 /// Which edge of the speech bubble the tail protrudes from
 enum TailSide {
-    case bottom, top, left, right
+    case bottom, top, left, right, none
 
     var paddingEdge: Edge.Set {
         switch self {
@@ -34,6 +34,7 @@ enum TailSide {
         case .top: return .top
         case .left: return .leading
         case .right: return .trailing
+        case .none: return []
         }
     }
 }
@@ -76,6 +77,7 @@ private struct SpeechBubbleShape: Shape {
         case .top:    return topPath(in: rect)
         case .left:   return leftPath(in: rect)
         case .right:  return rightPath(in: rect)
+        case .none:   return RoundedRectangle(cornerRadius: r).path(in: rect)
         }
     }
 
@@ -214,8 +216,8 @@ private func markdownText(_ string: String) -> Text {
 
 /// Activate the terminal running the Claude Code session.
 /// Delegates to shared IDETerminalFocus utility (supports exact tab switching via IDE extension).
-private func focusTerminal(pid: Int? = nil, shellPid: Int? = nil) {
-    IDETerminalFocus.focus(terminalPid: pid, shellPid: shellPid)
+private func focusTerminal(pid: Int? = nil, shellPid: Int? = nil, projectDir: String? = nil) {
+    IDETerminalFocus.focus(terminalPid: pid, shellPid: shellPid, projectDir: projectDir)
 }
 
 // MARK: - AskUserQuestion View
@@ -265,7 +267,7 @@ struct AskUserQuestionView: View {
                 Spacer()
 
                 HStack(spacing: 3) {
-                    Button { focusTerminal(pid: permission.event.terminalPid, shellPid: permission.event.shellPid) } label: {
+                    Button { focusTerminal(pid: permission.event.terminalPid, shellPid: permission.event.shellPid, projectDir: permission.event.cwd) } label: {
                         Image(systemName: "terminal.fill")
                             .font(.system(size: 10))
                             .foregroundStyle(OverlayStyle.textHint)
@@ -416,7 +418,7 @@ struct AskUserQuestionView: View {
                     if questions.count > 1 {
                         currentQuestionIndex = questionIndex
                     }
-                    focusTerminal(pid: permission.event.terminalPid, shellPid: permission.event.shellPid)
+                    focusTerminal(pid: permission.event.terminalPid, shellPid: permission.event.shellPid, projectDir: permission.event.cwd)
                 }
 
             VStack(alignment: .leading, spacing: 2) {
@@ -595,7 +597,7 @@ struct ExitPlanModeView: View {
                 Spacer()
 
                 HStack(spacing: 3) {
-                    Button { focusTerminal(pid: permission.event.terminalPid, shellPid: permission.event.shellPid) } label: {
+                    Button { focusTerminal(pid: permission.event.terminalPid, shellPid: permission.event.shellPid, projectDir: permission.event.cwd) } label: {
                         Image(systemName: "terminal.fill")
                             .font(.system(size: 10))
                             .foregroundStyle(OverlayStyle.textHint)
@@ -863,7 +865,7 @@ struct PermissionPromptView: View {
                 Spacer()
 
                 HStack(spacing: 3) {
-                    Button { focusTerminal(pid: permission.event.terminalPid, shellPid: permission.event.shellPid) } label: {
+                    Button { focusTerminal(pid: permission.event.terminalPid, shellPid: permission.event.shellPid, projectDir: permission.event.cwd) } label: {
                         Image(systemName: "terminal.fill")
                             .font(.system(size: 10))
                             .foregroundStyle(OverlayStyle.textHint)
@@ -1043,7 +1045,7 @@ private struct CollapsedPermissionPill: View {
 
             Spacer(minLength: 0)
 
-            Button { focusTerminal(pid: permission.event.terminalPid, shellPid: permission.event.shellPid) } label: {
+            Button { focusTerminal(pid: permission.event.terminalPid, shellPid: permission.event.shellPid, projectDir: permission.event.cwd) } label: {
                 Image(systemName: "terminal.fill")
                     .font(.system(size: 9))
                     .foregroundStyle(OverlayStyle.textHint)

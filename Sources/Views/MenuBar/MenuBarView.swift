@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MenuBarView: View {
     @Environment(AppStore.self) var appStore
+    @Environment(OverlayManager.self) var overlayManager
     @Environment(AppUpdater.self) var appUpdater
 
     var body: some View {
@@ -94,6 +95,38 @@ struct MenuBarView: View {
 
                 Divider().overlay(Constants.border)
             }
+
+            // Mascot overlay toggle
+            HStack {
+                Image(systemName: overlayManager.isOverlayEnabled ? "eye" : "eye.slash")
+                    .font(.system(size: 12))
+                    .foregroundColor(Constants.textMuted)
+                Text("Mascot Overlay")
+                    .font(Constants.body(size: 12))
+                    .foregroundColor(Constants.textPrimary)
+                Spacer()
+                Button(action: {
+                    if overlayManager.isOverlayEnabled {
+                        overlayManager.disableOverlay()
+                    } else {
+                        overlayManager.enableOverlay()
+                        overlayManager.restoreIfNeeded()
+                    }
+                }) {
+                    Text(overlayManager.isOverlayEnabled ? "Disable" : "Enable")
+                        .font(Constants.heading(size: 11, weight: .semibold))
+                        .foregroundColor(overlayManager.isOverlayEnabled ? Constants.textMuted : .white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 3)
+                        .background(overlayManager.isOverlayEnabled ? Constants.border : Constants.orangePrimary)
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 6)
+
+            Divider().overlay(Constants.border)
 
             // Quick actions
             Button(action: {

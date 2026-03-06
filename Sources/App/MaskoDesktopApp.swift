@@ -9,6 +9,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillFinishLaunching(_ notification: Notification) {
         // Menu bar only — no dock icon
         NSApp.setActivationPolicy(.accessory)
+        UserDefaults.standard.register(defaults: ["overlay_enabled": true])
         registerBundledFonts()
     }
 

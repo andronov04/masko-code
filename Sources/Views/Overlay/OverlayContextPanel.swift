@@ -80,7 +80,9 @@ final class ContextMenuPanel: NSPanel {
 struct OverlayContextMenuContent: View {
     let onSnooze: (Int) -> Void     // 0 = indefinite
     let onResize: (OverlaySize) -> Void
+    let onMove: (OverlayPosition) -> Void
     let onClose: () -> Void
+    let onDisable: () -> Void
     let dismiss: () -> Void
 
     @State private var expandedSection: Section?
@@ -91,7 +93,7 @@ struct OverlayContextMenuContent: View {
     @AppStorage("overlay_size") private var currentSizePixels: Int = OverlaySize.medium.rawValue
     @AppStorage("overlay_resize_mode") private var resizeMode = false
 
-    private enum Section { case snooze, size }
+    private enum Section { case snooze, size, position }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -119,11 +121,22 @@ struct OverlayContextMenuContent: View {
                     resizeMode = true
                     dismiss()
                 }
+            } else if expandedSection == .position {
+                // Position sub-items
+                menuHeader("Position") { expandedSection = nil }
+                divider
+                positionItem("Bottom Right", position: .bottomRight)
+                positionItem("Bottom Left", position: .bottomLeft)
+                positionItem("Top Right", position: .topRight)
+                positionItem("Top Left", position: .topLeft)
             } else {
                 // Main menu
                 expandableItem("Snooze", icon: "moon.zzz.fill") { expandedSection = .snooze }
                 expandableItem("Size", icon: "arrow.up.left.and.arrow.down.right") { expandedSection = .size }
+                expandableItem("Position", icon: "arrow.up.and.down.and.arrow.left.and.right") { expandedSection = .position }
                 divider
+                openDashboardItem
+                disableItem
                 closeItem
             }
         }
@@ -299,6 +312,82 @@ struct OverlayContextMenuContent: View {
         .onHover { hoveredItem = $0 ? "size-\(title)" : nil }
     }
 
+    private func positionItem(_ title: String, position: OverlayPosition) -> some View {
+        Button {
+            onMove(position)
+            dismiss()
+        } label: {
+            HStack(spacing: 8) {
+                Text(title)
+                    .font(Constants.body(size: 13, weight: .medium))
+                    .foregroundStyle(Constants.textPrimary)
+                Spacer()
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(hoveredItem == "pos-\(title)" ? Constants.orangePrimarySubtle : Color.clear)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hoveredItem = $0 ? "pos-\(title)" : nil }
+    }
+
+    private var disableItem: some View {
+        Button {
+            onDisable()
+            dismiss()
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "eye.slash")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Constants.textMuted)
+                    .frame(width: 16)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Disable Mascot")
+                        .font(Constants.heading(size: 13, weight: .medium))
+                        .foregroundStyle(Constants.textPrimary)
+                    Text("Notifications will continue")
+                        .font(Constants.body(size: 10))
+                        .foregroundStyle(Constants.textMuted)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(hoveredItem == "disable" ? Constants.orangePrimarySubtle : Color.clear)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hoveredItem = $0 ? "disable" : nil }
+    }
+
+    private var openDashboardItem: some View {
+        Button {
+            AppDelegate.showDashboard()
+            dismiss()
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "square.grid.2x2")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Constants.textMuted)
+                    .frame(width: 16)
+                Text("Open Dashboard")
+                    .font(Constants.heading(size: 13, weight: .medium))
+                    .foregroundStyle(Constants.textPrimary)
+                Spacer()
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(hoveredItem == "dashboard" ? Constants.orangePrimarySubtle : Color.clear)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hoveredItem = $0 ? "dashboard" : nil }
+    }
+
     private var closeItem: some View {
         Button {
             onClose()
@@ -330,6 +419,109 @@ struct OverlayContextMenuContent: View {
             .frame(height: 1)
             .padding(.horizontal, 8)
             .padding(.vertical, 2)
+    }
+}
+
+// MARK: - Standalone Stats Context Menu (notification-only mode)
+
+struct StandaloneContextMenuContent: View {
+    let onEnableMascot: () -> Void
+    let onOpenDashboard: () -> Void
+    let onClose: () -> Void
+    let dismiss: () -> Void
+    @State private var hoveredItem: String?
+
+    private var divider: some View {
+        Rectangle()
+            .fill(Constants.border)
+            .frame(height: 1)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 2)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Open Dashboard
+            Button {
+                onOpenDashboard()
+                dismiss()
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "square.grid.2x2")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Constants.textMuted)
+                        .frame(width: 16)
+                    Text("Open Dashboard")
+                        .font(Constants.heading(size: 13, weight: .medium))
+                        .foregroundStyle(Constants.textPrimary)
+                    Spacer()
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(hoveredItem == "dashboard" ? Constants.orangePrimarySubtle : Color.clear)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onHover { hoveredItem = $0 ? "dashboard" : nil }
+
+            // Enable Mascot
+            Button {
+                onEnableMascot()
+                dismiss()
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "wand.and.stars")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Constants.orangePrimary)
+                        .frame(width: 16)
+                    Text("Enable Mascot")
+                        .font(Constants.heading(size: 13, weight: .medium))
+                        .foregroundStyle(Constants.textPrimary)
+                    Spacer()
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(hoveredItem == "enable" ? Constants.orangePrimarySubtle : Color.clear)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onHover { hoveredItem = $0 ? "enable" : nil }
+
+            // Close
+            Button {
+                onClose()
+                dismiss()
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color(.sRGB, red: 220/255, green: 38/255, blue: 38/255))
+                        .frame(width: 16)
+                    Text("Close")
+                        .font(Constants.heading(size: 13, weight: .medium))
+                        .foregroundStyle(Color(.sRGB, red: 220/255, green: 38/255, blue: 38/255))
+                    Spacer()
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(hoveredItem == "close" ? Color(.sRGB, red: 220/255, green: 38/255, blue: 38/255).opacity(0.08) : Color.clear)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onHover { hoveredItem = $0 ? "close" : nil }
+        }
+        .padding(6)
+        .background(Constants.surfaceWhite)
+        .clipShape(RoundedRectangle(cornerRadius: Constants.cornerRadiusSmall))
+        .overlay(
+            RoundedRectangle(cornerRadius: Constants.cornerRadiusSmall)
+                .stroke(Constants.border, lineWidth: 1)
+        )
+        .shadow(color: Constants.cardHoverShadowColor, radius: Constants.cardHoverShadowRadius, x: 0, y: Constants.cardHoverShadowY)
+        .frame(width: 200)
     }
 }
 

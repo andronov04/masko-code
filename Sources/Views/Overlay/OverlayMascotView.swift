@@ -43,3 +43,7 @@ enum OverlaySize: Int, CaseIterable {
         CGSize(width: rawValue, height: rawValue)
     }
 }
+
+enum OverlayPosition {
+    case bottomRight, bottomLeft, topRight, topLeft
+}

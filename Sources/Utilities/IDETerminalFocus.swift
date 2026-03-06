@@ -7,14 +7,14 @@ enum IDETerminalFocus {
 
     /// Focus the terminal for a given session.
     static func focusSession(_ session: ClaudeSession) {
-        focus(terminalPid: session.terminalPid, shellPid: session.shellPid)
+        focus(terminalPid: session.terminalPid, shellPid: session.shellPid, projectDir: session.projectDir)
     }
 
     /// Focus a terminal by PID.
-    /// 1. If shellPid + IDE extension available → open URI to focus exact terminal tab
+    /// 1. If shellPid + IDE extension available → bring correct window to front, then open URI to focus exact terminal tab
     /// 2. If terminalPid available → activate the IDE/terminal app (brings to foreground)
     /// 3. Fallback → activate first running terminal-like app
-    static func focus(terminalPid: Int? = nil, shellPid: Int? = nil) {
+    static func focus(terminalPid: Int? = nil, shellPid: Int? = nil, projectDir: String? = nil) {
         // Resolve bundle ID from terminalPid
         var bundleId: String?
         if let pid = terminalPid,
@@ -22,14 +22,20 @@ enum IDETerminalFocus {
             bundleId = app.bundleIdentifier
         }
 
-        // Try IDE extension URI for exact terminal tab focus
+        // Try IDE extension for exact terminal tab focus
         if let shellPid,
            let bundleId,
            let scheme = ExtensionInstaller.uriScheme(forBundleId: bundleId),
            UserDefaults.standard.bool(forKey: "ideExtensionEnabled") {
+            // Bring correct window to front by workspace path, then fire URI
+            if let projectDir {
+                bringWindowToFront(bundleId: bundleId, projectDir: projectDir)
+            }
             let urlString = "\(scheme)://masko.masko-terminal-focus/focus?pid=\(shellPid)"
             if let url = URL(string: urlString) {
-                NSWorkspace.shared.open(url)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    NSWorkspace.shared.open(url)
+                }
                 return
             }
         }
@@ -41,7 +47,14 @@ enum IDETerminalFocus {
             }
         }
 
-        // Fallback: bring IDE/terminal to foreground (no tab switch)
+        // Activate the SPECIFIC process by PID (correct window with multiple instances)
+        if let pid = terminalPid,
+           let app = NSRunningApplication(processIdentifier: pid_t(pid)) {
+            app.activate()
+            return
+        }
+
+        // Fallback: bring IDE/terminal to foreground by bundle ID (no specific PID)
         if let bundleId {
             activateApp(bundleId: bundleId)
             return
@@ -163,6 +176,18 @@ enum IDETerminalFocus {
         } catch {
             return false
         }
+    }
+
+    /// Bring the correct IDE window to front by opening its workspace path.
+    /// `open -b <bundleId> <projectDir>` tells macOS to activate the window for that workspace.
+    private static func bringWindowToFront(bundleId: String, projectDir: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        process.arguments = ["-b", bundleId, projectDir]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try? process.run()
+        process.waitUntilExit()
     }
 
     /// AppleScript `tell application id` — most reliable cross-Space activation on macOS 14+.

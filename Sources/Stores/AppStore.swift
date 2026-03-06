@@ -156,7 +156,6 @@ final class AppStore {
         hotkeyManager.onSessionSwitcherOpen = { [weak self] in
             guard let self else { return }
             let active = self.sessionStore.activeSessions
-            guard active.count >= 2 else { return }
             self.sessionSwitcherStore.open(sessions: active)
             self.hotkeyManager.shared.sessionSwitcherActive = true
             self.onSessionSwitcherShow?()
@@ -208,7 +207,8 @@ final class AppStore {
             if let topPerm = reversed.first {
                 IDETerminalFocus.focus(
                     terminalPid: topPerm.event.terminalPid,
-                    shellPid: topPerm.event.shellPid
+                    shellPid: topPerm.event.shellPid,
+                    projectDir: topPerm.event.cwd
                 )
             } else {
                 self.hotkeyManager.toggleFocus()
@@ -246,6 +246,11 @@ final class AppStore {
         if hasCompletedOnboarding {
             hotkeyManager.start()
             await notificationService.requestPermission()
+
+            // Auto-upgrade IDE extension if a newer version is bundled
+            if UserDefaults.standard.bool(forKey: "ideExtensionEnabled") {
+                ExtensionInstaller.upgradeIfNeeded()
+            }
         }
 
         do {

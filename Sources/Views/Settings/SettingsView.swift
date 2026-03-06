@@ -354,6 +354,7 @@ struct SettingsView: View {
         DispatchQueue.global(qos: .userInitiated).async {
             do {
                 try ExtensionInstaller.install()
+                UserDefaults.standard.set(ExtensionInstaller.bundledVersion, forKey: "ideExtensionVersion")
                 let statuses = ExtensionInstaller.allIDEStatuses()
                 DispatchQueue.main.async {
                     ideStatuses = statuses
@@ -377,6 +378,7 @@ struct SettingsView: View {
         DispatchQueue.global(qos: .userInitiated).async {
             do {
                 try ExtensionInstaller.install(command: command)
+                UserDefaults.standard.set(ExtensionInstaller.bundledVersion, forKey: "ideExtensionVersion")
                 let statuses = ExtensionInstaller.allIDEStatuses()
                 DispatchQueue.main.async {
                     ideStatuses = statuses

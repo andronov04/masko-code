@@ -27,6 +27,10 @@ final class OverlayManager {
     private var permissionHUDConfig = PermissionHUDConfig()
     private var workspaceObservers: [NSObjectProtocol] = []
 
+    // Overlay enabled/disabled (notification-only mode)
+    // Stored property so @Observable can track it for SwiftUI reactivity
+    private(set) var isOverlayEnabled: Bool = UserDefaults.standard.bool(forKey: "overlay_enabled")
+
     // Snooze state
     private(set) var isSnoozed = false
     private(set) var snoozeEndDate: Date?
@@ -59,6 +63,7 @@ final class OverlayManager {
     }
 
     func showOverlay(url: URL) {
+        guard isOverlayEnabled else { return }
         // If same URL already active, just re-assert
         if panel != nil, currentURL == url {
             reassertPanel()
@@ -126,6 +131,7 @@ final class OverlayManager {
     /// Show overlay using a canvas config with a full state machine.
     /// Creates two panels: mascot (fixed) + HUD (child, above).
     func showOverlayWithConfig(_ config: MaskoAnimationConfig) {
+        guard isOverlayEnabled else { return }
         // Cancel any active snooze
         cancelSnooze()
 
@@ -191,7 +197,7 @@ final class OverlayManager {
             .environment(sessionStore)
             .environment(pendingPermissionStore)
 
-        let statsWidth = max(size.width, 180)
+        let statsWidth: CGFloat = 180
         let statsController = TransparentHostingController(rootView: statsView)
         let statsHeight = max(statsController.view.fittingSize.height, 20)
         let statsRect = NSRect(
@@ -202,6 +208,9 @@ final class OverlayManager {
         )
         let newStatsPanel = OverlayPanel(contentRect: statsRect)
         newStatsPanel.isMovableByWindowBackground = false
+
+        // Right-click on stats opens same context menu as mascot
+        newStatsPanel.onRightClick = { [weak self] point in self?.showContextMenu(at: point) }
 
         newStatsPanel.contentView = statsController.view
         newStatsPanel.contentViewController = statsController
@@ -340,6 +349,7 @@ final class OverlayManager {
 
     /// Cancel snooze and restore the overlay immediately.
     func wakeFromSnooze() {
+        guard isOverlayEnabled else { return }
         snoozeTimer?.invalidate()
         snoozeTimer = nil
         let config = snoozedConfig
@@ -380,6 +390,200 @@ final class OverlayManager {
         }
     }
 
+    /// Disable the mascot overlay (notification-only mode).
+    /// Hides mascot panel, recreates stats + permission panels in standalone mode.
+    func disableOverlay() {
+        isOverlayEnabled = false
+        UserDefaults.standard.set(false, forKey: "overlay_enabled")
+        cancelSnooze()
+
+        // Save mascot position — overlay_x/y is always the mascot origin
+        if let panel {
+            let f = panel.frame
+            UserDefaults.standard.set(f.origin.x, forKey: "overlay_x")
+            UserDefaults.standard.set(f.origin.y, forKey: "overlay_y")
+        }
+
+        // Capture exact stats panel frame before closing — use it for standalone placement
+        let previousStatsFrame = statsPanel?.frame
+
+        // Clear standalone position so it re-derives from mascot on next disable
+        UserDefaults.standard.removeObject(forKey: "standalone_x")
+        UserDefaults.standard.removeObject(forKey: "standalone_y")
+
+        // Close everything and rebuild in standalone mode
+        for observer in workspaceObservers {
+            NotificationCenter.default.removeObserver(observer)
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
+        }
+        workspaceObservers.removeAll()
+
+        dismissContextMenu()
+        dismissSessionSwitcher()
+        permissionPanel?.close()
+        permissionPanel = nil
+        statsPanel?.close()
+        statsPanel = nil
+        panel?.close()
+        panel = nil
+        currentURL = nil
+        currentConfig = nil
+        currentStateMachine = nil
+        isOverlayActive = false
+
+        // Recreate stats + permission panels in standalone mode
+        showPermissionPanelStandalone(previousStatsFrame: previousStatsFrame)
+    }
+
+    /// Re-enable the mascot overlay.
+    func enableOverlay() {
+        isOverlayEnabled = true
+        UserDefaults.standard.set(true, forKey: "overlay_enabled")
+    }
+
+    /// Show just the permission panel + stats in standalone mode (no mascot, no tail, bottom-right).
+    /// - Parameter previousStatsFrame: The exact frame of the stats panel before it was closed (for seamless transition).
+    func showPermissionPanelStandalone(previousStatsFrame: NSRect? = nil) {
+        guard permissionPanel == nil else { return }
+
+        let screen = NSScreen.main?.visibleFrame ?? .zero
+
+        // --- Stats panel (standalone, draggable anchor) ---
+        // Wrap in frame(maxWidth: .infinity) to center the capsule pill — matches StatsHUDView layout
+        let statsView = StatsOverlayView()
+            .frame(maxWidth: .infinity)
+            .environment(sessionStore)
+            .environment(pendingPermissionStore)
+
+        let statsController = TransparentHostingController(rootView: statsView)
+        let fittingSize = statsController.view.fittingSize
+        let minWidth: CGFloat = 180
+        let finalHeight = max(fittingSize.height, 20)
+        let finalWidth = max(fittingSize.width, minWidth)
+
+        // Position priority: previous stats frame > saved standalone pos > derive from mascot > default
+        let statsRect: NSRect
+        if let prev = previousStatsFrame {
+            // Place at exact same position as the mascot-mode stats panel
+            let centerX = prev.midX
+            statsRect = NSRect(
+                x: centerX - finalWidth / 2,
+                y: prev.origin.y,
+                width: finalWidth,
+                height: prev.height  // Exact same height to avoid pixel shift
+            )
+        } else {
+            let standaloneX = UserDefaults.standard.double(forKey: "standalone_x")
+            let standaloneY = UserDefaults.standard.double(forKey: "standalone_y")
+            let savedX = UserDefaults.standard.double(forKey: "overlay_x")
+            let savedY = UserDefaults.standard.double(forKey: "overlay_y")
+            let mascotSize = CGFloat(currentSizePixels)
+            let statsOrigin: CGPoint
+            if standaloneX > 0 || standaloneY > 0 {
+                statsOrigin = CGPoint(x: standaloneX, y: standaloneY)
+            } else if savedX > 0 || savedY > 0 {
+                let mascotMidX = savedX + mascotSize / 2
+                statsOrigin = CGPoint(
+                    x: mascotMidX - finalWidth / 2,
+                    y: savedY + mascotSize + 4
+                )
+            } else {
+                statsOrigin = CGPoint(
+                    x: screen.maxX - finalWidth - 40,
+                    y: screen.minY + 40
+                )
+            }
+            statsRect = NSRect(origin: statsOrigin, size: CGSize(width: finalWidth, height: finalHeight))
+        }
+        let newStatsPanel = OverlayPanel(contentRect: statsRect)
+        newStatsPanel.isMovableByWindowBackground = true  // Draggable!
+        newStatsPanel.contentView = statsController.view
+        newStatsPanel.contentViewController = statsController
+
+        // Right-click to show standalone context menu
+        newStatsPanel.onRightClick = { [weak self] point in
+            self?.showStandaloneContextMenu(at: point)
+        }
+
+        newStatsPanel.orderFrontRegardless()
+        SkyLightOperator.shared.delegateWindow(newStatsPanel)
+        self.statsPanel = newStatsPanel
+
+        // Save position when dragged (separate keys — don't overwrite mascot position)
+        let moveObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didMoveNotification,
+            object: newStatsPanel,
+            queue: .main
+        ) { [weak self, weak newStatsPanel] _ in
+            Task { @MainActor in
+                guard let origin = newStatsPanel?.frame.origin else { return }
+                UserDefaults.standard.set(origin.x, forKey: "standalone_x")
+                UserDefaults.standard.set(origin.y, forKey: "standalone_y")
+                self?.scheduleHUDReposition()
+            }
+        }
+        workspaceObservers.append(moveObserver)
+
+        // Re-assert on Space switch
+        let spaceObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.activeSpaceDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak newStatsPanel, weak self] _ in
+            Task { @MainActor in
+                newStatsPanel?.orderFrontRegardless()
+                self?.permissionPanel?.orderFrontRegardless()
+            }
+        }
+        workspaceObservers.append(spaceObserver)
+
+        // --- Permission panel (above stats, no tail) ---
+        permissionHUDConfig = PermissionHUDConfig()
+        permissionHUDConfig.onContentSizeChange = { [weak self] _ in
+            self?.scheduleHUDReposition()
+        }
+        let permView = PermissionHUDView(config: permissionHUDConfig)
+            .environment(pendingPermissionStore)
+            .environment(hotkeyManager)
+            .environment(sessionSwitcherStore)
+
+        let permController = TransparentHostingController(rootView: permView)
+        permController.sizingOptions = []
+
+        let permRect = NSRect(
+            x: statsRect.midX - 140,
+            y: statsRect.maxY + 4,
+            width: 280,
+            height: 200
+        )
+        let newPermPanel = OverlayPanel(contentRect: permRect)
+        newPermPanel.isMovableByWindowBackground = false
+        newPermPanel.contentView = permController.view
+        newPermPanel.contentViewController = permController
+
+        pendingPermissionStore.onPendingChange = { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                self?.scheduleHUDReposition()
+            }
+        }
+
+        pendingPermissionStore.onRequestTextInputFocus = { [weak self] in
+            guard let permPanel = self?.permissionPanel else { return }
+            NSApp.activate(ignoringOtherApps: true)
+            permPanel.makeKey()
+        }
+
+        newPermPanel.orderFrontRegardless()
+        SkyLightOperator.shared.delegateWindow(newPermPanel)
+        newStatsPanel.addChildWindow(newPermPanel, ordered: .above)
+
+        self.permissionPanel = newPermPanel
+
+        // Set tail to none for standalone mode
+        permissionHUDConfig.tailSide = .none
+        permissionHUDConfig.tailPercent = 0
+    }
+
     func toggleOverlay() {
         if isOverlayActive {
             hideOverlay()
@@ -391,6 +595,12 @@ final class OverlayManager {
 
     /// Restore overlay from previous session
     func restoreIfNeeded() {
+        // If mascot is disabled, only show standalone permission panel
+        if !isOverlayEnabled {
+            showPermissionPanelStandalone()
+            return
+        }
+
         // Check if we're in a snooze period
         let snoozeEndTimestamp = UserDefaults.standard.double(forKey: "snooze_end_date")
         if snoozeEndTimestamp > 0 {
@@ -445,22 +655,102 @@ final class OverlayManager {
 
     // MARK: - Context Menu
 
+    /// Move the mascot overlay to a screen corner position.
+    func moveToPosition(_ position: OverlayPosition) {
+        guard let panel else { return }
+        let screen = panel.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
+        let size = panel.frame.size
+        let margin: CGFloat = 40
+
+        let origin: CGPoint
+        switch position {
+        case .bottomRight:
+            origin = CGPoint(x: screen.maxX - size.width - margin, y: screen.minY + margin)
+        case .bottomLeft:
+            origin = CGPoint(x: screen.minX + margin, y: screen.minY + margin)
+        case .topRight:
+            origin = CGPoint(x: screen.maxX - size.width - margin, y: screen.maxY - size.height - margin)
+        case .topLeft:
+            origin = CGPoint(x: screen.minX + margin, y: screen.maxY - size.height - margin)
+        }
+
+        panel.setFrame(NSRect(origin: origin, size: size), display: true, animate: true)
+        savePosition()
+        scheduleHUDReposition()
+    }
+
     func showContextMenu(at point: NSPoint) {
         dismissContextMenu()
         let panel = ContextMenuPanel()
         let content = OverlayContextMenuContent(
             onSnooze: { [weak self] minutes in self?.snooze(minutes: minutes) },
             onResize: { [weak self] size in self?.currentSizePixels = size.rawValue },
+            onMove: { [weak self] position in self?.moveToPosition(position) },
             onClose: { [weak self] in self?.hideOverlay() },
+            onDisable: { [weak self] in self?.disableOverlay() },
             dismiss: { [weak panel] in panel?.dismiss() }
         )
         panel.showAt(point: point, mascotFrame: self.panel?.frame, with: content)
         self.contextPanel = panel
     }
 
+    /// Show a lightweight context menu for the standalone stats pill (notification-only mode).
+    func showStandaloneContextMenu(at point: NSPoint) {
+        dismissContextMenu()
+        let menuPanel = ContextMenuPanel()
+        let content = StandaloneContextMenuContent(
+            onEnableMascot: { [weak self] in
+                guard let self else { return }
+                // If user dragged the stats pill, update mascot position to match
+                if let statsFrame = self.statsPanel?.frame {
+                    let mascotSize = CGFloat(self.currentSizePixels)
+                    let screen = self.statsPanel?.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
+                    let mascotX = max(screen.minX, min(statsFrame.midX - mascotSize / 2, screen.maxX - mascotSize))
+                    let mascotY = max(screen.minY, min(statsFrame.origin.y - 4 - mascotSize, screen.maxY - mascotSize))
+                    UserDefaults.standard.set(mascotX, forKey: "overlay_x")
+                    UserDefaults.standard.set(mascotY, forKey: "overlay_y")
+                }
+                // Close standalone panels first
+                self.permissionPanel?.close()
+                self.permissionPanel = nil
+                self.statsPanel?.close()
+                self.statsPanel = nil
+                for observer in self.workspaceObservers {
+                    NotificationCenter.default.removeObserver(observer)
+                    NSWorkspace.shared.notificationCenter.removeObserver(observer)
+                }
+                self.workspaceObservers.removeAll()
+                self.enableOverlay()
+                self.restoreIfNeeded()
+            },
+            onOpenDashboard: {
+                AppDelegate.showDashboard()
+            },
+            onClose: { [weak self] in
+                self?.hideStandalone()
+            },
+            dismiss: { [weak menuPanel] in menuPanel?.dismiss() }
+        )
+        menuPanel.showAt(point: point, mascotFrame: statsPanel?.frame, with: content)
+        self.contextPanel = menuPanel
+    }
+
     func dismissContextMenu() {
         contextPanel?.dismiss()
         contextPanel = nil
+    }
+
+    /// Close standalone panels (stats + permission) entirely.
+    private func hideStandalone() {
+        for observer in workspaceObservers {
+            NotificationCenter.default.removeObserver(observer)
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
+        }
+        workspaceObservers.removeAll()
+        permissionPanel?.close()
+        permissionPanel = nil
+        statsPanel?.close()
+        statsPanel = nil
     }
 
     // MARK: - Session Switcher (rendered inside permission panel)
@@ -594,30 +884,57 @@ final class OverlayManager {
         CATransaction.commit()
     }
 
-    /// Position stats panel directly above mascot (fixed, never adapts).
+    /// Position stats panel directly above mascot, or at bottom-right in standalone mode.
     private func repositionStats() {
-        guard let panel, let statsPanel else { return }
-        let mascotFrame = panel.frame
-        let statsSize = statsPanel.frame.size
+        guard let statsPanel else { return }
 
-        let x = mascotFrame.midX - statsSize.width / 2
-        let y = mascotFrame.maxY + 4
-        statsPanel.setFrameOrigin(CGPoint(x: x, y: y))
+        if let panel {
+            // Mascot mode: center above mascot
+            let mascotFrame = panel.frame
+            let statsSize = statsPanel.frame.size
+            let x = mascotFrame.midX - statsSize.width / 2
+            let y = mascotFrame.maxY + 4
+            statsPanel.setFrameOrigin(CGPoint(x: x, y: y))
+        }
+        // Standalone mode: stats stay at their initial position
     }
 
     /// Measure permission content, resize panel, and smart-position it.
-    /// Tries above → right → left → below mascot.
+    /// Tries above → right → left → below mascot. In standalone mode, positions at bottom-right.
     private func syncPermissionPanel() {
         #if DEBUG
         PerfMonitor.shared.track(.syncPermissionPanel)
         #endif
-        guard let panel, let permissionPanel else { return }
+        guard let permissionPanel else { return }
 
         let contentSize = permissionHUDConfig.contentSize
         // Skip if no content (no permissions AND no session switcher)
         if contentSize.height <= 10 { return }
 
         let permSize = CGSize(width: max(contentSize.width, 280), height: contentSize.height)
+
+        // Standalone mode — no mascot panel, position above the draggable stats pill
+        guard let panel else {
+            if let statsPanel {
+                let statsFrame = statsPanel.frame
+                let origin = CGPoint(
+                    x: statsFrame.midX - permSize.width / 2,
+                    y: statsFrame.maxY + 4
+                )
+                // Clamp to screen
+                let screen = statsPanel.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
+                let clampedX = max(screen.minX, min(origin.x, screen.maxX - permSize.width))
+                let clampedY = min(origin.y, screen.maxY - permSize.height)
+                permissionPanel.setFrame(NSRect(origin: CGPoint(x: clampedX, y: clampedY), size: permSize), display: true)
+            } else {
+                let screen = permissionPanel.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
+                let origin = CGPoint(x: screen.maxX - permSize.width - 20, y: screen.minY + 80)
+                permissionPanel.setFrame(NSRect(origin: origin, size: permSize), display: true)
+            }
+            permissionHUDConfig.tailSide = .none
+            permissionHUDConfig.tailPercent = 0
+            return
+        }
 
         let mascotFrame = panel.frame
         let screen = panel.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero

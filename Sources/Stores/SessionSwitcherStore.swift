@@ -10,7 +10,6 @@ final class SessionSwitcherStore {
     var onTapConfirm: ((ClaudeSession) -> Void)?
 
     func open(sessions: [ClaudeSession]) {
-        guard sessions.count >= 2 else { return }
         // Running sessions first, then by most recently active.
         self.sessions = sessions.sorted {
             if $0.phase == .running && $1.phase != .running { return true }

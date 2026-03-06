@@ -398,6 +398,7 @@ struct OnboardingView: View {
             try ExtensionInstaller.install()
             ideExtensionInstalled = true
             UserDefaults.standard.set(true, forKey: "ideExtensionEnabled")
+            UserDefaults.standard.set(ExtensionInstaller.bundledVersion, forKey: "ideExtensionVersion")
             ExtensionInstaller.triggerPermissionPrompt()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                 nextStep(after: 4)

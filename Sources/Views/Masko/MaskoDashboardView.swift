@@ -276,6 +276,40 @@ struct MaskoDashboardView: View {
             .padding(.top, 16)
             .padding(.bottom, 12)
 
+            if !overlayManager.isOverlayEnabled {
+                HStack(spacing: 10) {
+                    Image(systemName: "eye.slash")
+                        .font(.system(size: 14))
+                        .foregroundColor(Constants.textMuted)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Mascot overlay is disabled")
+                            .font(Constants.heading(size: 13, weight: .medium))
+                            .foregroundColor(Constants.textPrimary)
+                        Text("Notifications and permissions still work. Activate a mascot to re-enable.")
+                            .font(Constants.body(size: 12))
+                            .foregroundColor(Constants.textMuted)
+                    }
+                    Spacer()
+                    Button(action: {
+                        overlayManager.enableOverlay()
+                        overlayManager.restoreIfNeeded()
+                    }) {
+                        Text("Enable")
+                            .font(Constants.heading(size: 13, weight: .semibold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 6)
+                            .background(Constants.orangePrimary)
+                            .clipShape(RoundedRectangle(cornerRadius: Constants.cornerRadiusSmall))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(12)
+                .background(Constants.border.opacity(0.5))
+                .clipShape(RoundedRectangle(cornerRadius: Constants.cornerRadiusSmall))
+                .padding(.horizontal, 20)
+            }
+
             mascotListView
         }
         .background(Constants.lightBackground)
@@ -300,6 +334,9 @@ struct MaskoDashboardView: View {
                             selectedMascotId = mascot.id
                         },
                         onActivate: {
+                            if !overlayManager.isOverlayEnabled {
+                                overlayManager.enableOverlay()
+                            }
                             overlayManager.showOverlayWithConfig(mascot.config)
                         },
                         onSaveConfig: { newConfig in

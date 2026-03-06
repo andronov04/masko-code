@@ -9,18 +9,26 @@ struct SessionSwitcherView: View {
     var body: some View {
         if store.isActive {
             VStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(store.sessions.enumerated()), id: \.element.id) { index, session in
-                    SessionSwitcherRow(
-                        session: session,
-                        index: index,
-                        isSelected: index == store.selectedIndex,
-                        showShortcuts: hotkeyManager.isCmdHeld,
-                        onTap: { store.tapConfirm(index: index) }
-                    )
+                if store.sessions.isEmpty {
+                    Text("No active sessions")
+                        .font(Constants.body(size: 11))
+                        .foregroundStyle(Constants.textMuted)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                } else {
+                    ForEach(Array(store.sessions.enumerated()), id: \.element.id) { index, session in
+                        SessionSwitcherRow(
+                            session: session,
+                            index: index,
+                            isSelected: index == store.selectedIndex,
+                            showShortcuts: hotkeyManager.isCmdHeld,
+                            onTap: { store.tapConfirm(index: index) }
+                        )
 
-                    if index < store.sessions.count - 1 {
-                        Divider()
-                            .padding(.leading, 12)
+                        if index < store.sessions.count - 1 {
+                            Divider()
+                                .padding(.leading, 12)
+                        }
                     }
                 }
 

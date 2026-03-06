@@ -10,7 +10,7 @@ final class HotkeySharedState: @unchecked Sendable {
     /// Whether pending permissions exist — controls Cmd+1-9 interception.
     var hasPendingPermissions = false
 
-    /// Number of active sessions — controls double-tap Cmd interception (only when >= 2).
+    /// Number of active sessions.
     var activeSessionCount: Int32 = 0
 
     /// Whether the session switcher overlay is currently showing.
@@ -374,7 +374,7 @@ private func globalHotkeyCallback(
                     } else {
                         state.lastCmdReleaseTime = now
                     }
-                } else if elapsed < 400 && state.activeSessionCount >= 2 {
+                } else if elapsed < 400 {
                     // Double-tap Cmd detected → open session switcher
                     GlobalHotkeyManager.debugLog("Double-tap Cmd detected — opening session switcher")
                     state.lastCmdReleaseTime = 0 // reset to prevent triple-tap
