@@ -151,6 +151,7 @@ struct MaskoDesktopApp: App {
                     overlayManager.pendingPermissionStore = appStore.pendingPermissionStore
                     overlayManager.hotkeyManager = appStore.hotkeyManager
                     overlayManager.sessionSwitcherStore = appStore.sessionSwitcherStore
+                    overlayManager.sessionFinishedStore = appStore.sessionFinishedStore
                     appStore.onEventForOverlay = { [weak overlayManager] event in
                         overlayManager?.handleEvent(event)
                     }
@@ -168,6 +169,9 @@ struct MaskoDesktopApp: App {
                     }
                     appStore.onSessionSwitcherDismiss = { [weak overlayManager] in
                         overlayManager?.dismissSessionSwitcher()
+                    }
+                    appStore.onToastChanged = { [weak overlayManager] in
+                        overlayManager?.repositionForToast()
                     }
                     await appStore.start()
                     overlayManager.restoreIfNeeded()

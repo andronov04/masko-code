@@ -50,6 +50,7 @@ final class OverlayManager {
     var pendingPermissionStore: PendingPermissionStore = PendingPermissionStore()
     var hotkeyManager: GlobalHotkeyManager = GlobalHotkeyManager()
     var sessionSwitcherStore: SessionSwitcherStore = SessionSwitcherStore()
+    var sessionFinishedStore: SessionFinishedStore = SessionFinishedStore()
 
     var currentSizePixels: Int {
         get {
@@ -237,6 +238,7 @@ final class OverlayManager {
             .environment(hotkeyManager)
             .environment(sessionSwitcherStore)
             .environment(sessionStore)
+            .environment(sessionFinishedStore)
 
         let permController = TransparentHostingController(rootView: permView)
         permController.sizingOptions = []
@@ -556,6 +558,7 @@ final class OverlayManager {
             .environment(hotkeyManager)
             .environment(sessionSwitcherStore)
             .environment(sessionStore)
+            .environment(sessionFinishedStore)
 
         let permController = TransparentHostingController(rootView: permView)
         permController.sizingOptions = []
@@ -764,6 +767,12 @@ final class OverlayManager {
     func dismissSessionSwitcher() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { self.scheduleHUDReposition() }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { self.scheduleHUDReposition() }
+    }
+
+    func repositionForToast() {
+        permissionPanel?.orderFrontRegardless()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { self.scheduleHUDReposition() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self.scheduleHUDReposition() }
     }
 
     // MARK: - Snooze Toast

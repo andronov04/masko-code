@@ -414,27 +414,40 @@ struct MaskoDashboardView: View {
 
     private var createMascotBanner: some View {
         Button(action: {
-            NSWorkspace.shared.open(URL(string: "\(Constants.maskoBaseURL)/collections")!)
+            NSWorkspace.shared.open(URL(string: "\(Constants.maskoBaseURL)/create/desktop")!)
         }) {
-            HStack(spacing: 12) {
-                Image(systemName: "paintbrush.pointed.fill")
-                    .font(.system(size: 16))
-                    .foregroundColor(Constants.orangePrimary)
-
-                VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 8) {
+                    Image(systemName: "paintbrush.pointed.fill")
+                        .font(.system(size: 14))
+                        .foregroundColor(Constants.orangePrimary)
                     Text("Create your own mascot")
                         .font(Constants.heading(size: 14, weight: .semibold))
                         .foregroundColor(Constants.textPrimary)
-                    Text("Open masko.ai, go to Canvas, and pick the Claude Code template")
-                        .font(Constants.body(size: 12))
-                        .foregroundColor(Constants.textMuted)
                 }
 
-                Spacer()
+                VStack(alignment: .leading, spacing: 6) {
+                    stepRow(number: "1", text: "Describe your mascot\u{2019}s 4 states")
+                    stepRow(number: "2", text: "AI generates images & animations")
+                    stepRow(number: "3", text: "Click \u{201C}Send to Desktop\u{201D} to install")
+                }
 
-                Image(systemName: "arrow.up.right")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(Constants.orangePrimary)
+                HStack {
+                    Spacer()
+                    HStack(spacing: 4) {
+                        Text("Open Mascot Creator")
+                            .font(Constants.heading(size: 13, weight: .semibold))
+                            .foregroundColor(.white)
+                        Image(systemName: "arrow.up.right")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.white)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Constants.orangePrimary)
+                    .clipShape(RoundedRectangle(cornerRadius: Constants.cornerRadiusSmall))
+                    Spacer()
+                }
             }
             .padding(14)
             .background(Constants.orangePrimary.opacity(0.05))
@@ -445,6 +458,20 @@ struct MaskoDashboardView: View {
             )
         }
         .buttonStyle(.plain)
+    }
+
+    private func stepRow(number: String, text: String) -> some View {
+        HStack(spacing: 8) {
+            Text(number)
+                .font(Constants.heading(size: 11, weight: .bold))
+                .foregroundColor(Constants.orangePrimary)
+                .frame(width: 18, height: 18)
+                .background(Constants.orangePrimary.opacity(0.15))
+                .clipShape(Circle())
+            Text(text)
+                .font(Constants.body(size: 12))
+                .foregroundColor(Constants.textMuted)
+        }
     }
 
     // MARK: - Add Sheet

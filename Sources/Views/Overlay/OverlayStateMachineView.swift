@@ -102,10 +102,12 @@ struct PermissionHUDView: View {
     let config: PermissionHUDConfig
     @Environment(SessionSwitcherStore.self) var sessionSwitcherStore
     @Environment(GlobalHotkeyManager.self) var hotkeyManager
+    @Environment(SessionFinishedStore.self) var sessionFinishedStore
 
     var body: some View {
         VStack(spacing: 4) {
             SessionSwitcherView()
+            SessionFinishedToastView()
             PermissionStackView()
         }
         .fixedSize(horizontal: false, vertical: true)

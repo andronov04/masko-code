@@ -12,6 +12,7 @@ final class AppStore {
     let mascotStore = MascotStore()
     let hotkeyManager = GlobalHotkeyManager()
     let sessionSwitcherStore = SessionSwitcherStore()
+    let sessionFinishedStore = SessionFinishedStore()
 
     private(set) var eventProcessor: EventProcessor!
     private(set) var isReady = false
@@ -24,6 +25,8 @@ final class AppStore {
     var onInputForOverlay: ((String, ConditionValue) -> Void)?
     /// Called when session phases change outside of events (e.g. interrupt detection via transcript)
     var onRefreshOverlay: (() -> Void)?
+    /// Called when the session-finished toast appears/dismisses — trigger panel reposition
+    var onToastChanged: (() -> Void)?
 
     /// Session switcher overlay callbacks — wire to OverlayManager
     var onSessionSwitcherShow: (() -> Void)?
@@ -64,6 +67,24 @@ final class AppStore {
                        $0.event.sessionId == sid && $0.event.agentId == event.agentId
                    }) {
                     self.pendingPermissionStore.dismissForAgent(sessionId: sid, agentId: event.agentId)
+                }
+
+                // Show "task completed" toast when Claude finishes (skip interrupts)
+                if event.eventType == .stop,
+                   event.reason != "interrupted",
+                   !self.pendingPermissionStore.pending.contains(where: { $0.event.sessionId == event.sessionId }) {
+                    self.sessionFinishedStore.show(
+                        sessionId: event.sessionId ?? "",
+                        projectName: event.projectName ?? "Project"
+                    )
+                    self.hotkeyManager.shared.hasSessionFinishedToast = true
+                    // Trigger overlay panel reposition after SwiftUI renders the toast
+                    self.onToastChanged?()
+                }
+
+                // Dismiss toast when user starts typing (already back in the loop)
+                if event.eventType == .userPromptSubmit {
+                    self.sessionFinishedStore.dismiss()
                 }
 
                 self.onEventForOverlay?(event)
@@ -112,6 +133,12 @@ final class AppStore {
             self.hotkeyManager.hasPendingPermissions = !self.pendingPermissionStore.pending.isEmpty
         }
 
+        // Wire session finished toast dismiss → hotkey manager + panel reposition
+        sessionFinishedStore.onDismiss = { [weak self] in
+            self?.hotkeyManager.shared.hasSessionFinishedToast = false
+            self?.onToastChanged?()
+        }
+
         // Wire hotkey manager — ⌘N selects Nth button within topmost card
         hotkeyManager.onSelectPermission = { [weak self] index in
             guard let self else { return }
@@ -123,10 +150,14 @@ final class AppStore {
             }
         }
 
-        // Wire hotkey manager — ⌘Enter confirms the selected button
+        // Wire hotkey manager — ⌘Enter confirms the selected button or dismisses toast
         hotkeyManager.onConfirmPermission = { [weak self] in
             guard let self else { return }
-            self.hotkeyManager.confirmTrigger += 1
+            if self.pendingPermissionStore.pending.isEmpty, self.sessionFinishedStore.current != nil {
+                self.sessionFinishedStore.dismiss()
+            } else {
+                self.hotkeyManager.confirmTrigger += 1
+            }
         }
 
         // Wire hotkey manager — ⌘Esc dismisses (denies) topmost non-collapsed permission
@@ -217,6 +248,10 @@ final class AppStore {
                     shellPid: topPerm.event.shellPid,
                     projectDir: sessionDir ?? topPerm.event.cwd
                 )
+            } else if let toast = self.sessionFinishedStore.current,
+                      let session = self.sessionStore.sessions.first(where: { $0.id == toast.sessionId }) {
+                IDETerminalFocus.focusSession(session)
+                self.sessionFinishedStore.dismiss()
             } else {
                 self.hotkeyManager.toggleFocus()
             }

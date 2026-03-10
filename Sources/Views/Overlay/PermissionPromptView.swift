@@ -206,6 +206,17 @@ private struct ActionBadge: View {
     }
 }
 
+/// Persistent shortcut hint bar shown below action buttons inside each card
+private struct ShortcutHintBar: View {
+    var body: some View {
+        Text("⌘↵ allow · ⌘⎋ deny · ⌘L later · ⌘⌘ switch")
+            .font(.system(size: 8, weight: .medium, design: .rounded))
+            .foregroundStyle(OverlayStyle.textPrimary.opacity(0.35))
+            .frame(maxWidth: .infinity)
+            .padding(.top, 4)
+    }
+}
+
 /// Render markdown string as AttributedString, falling back to plain text
 private func markdownText(_ string: String) -> Text {
     if let attributed = try? AttributedString(markdown: string, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
@@ -349,6 +360,8 @@ struct AskUserQuestionView: View {
                 }
                 .buttonStyle(.plain)
             }
+
+            ShortcutHintBar()
         }
         .padding(8)
         .padding(tailSide.paddingEdge, OverlayStyle.tailHeight)
@@ -773,6 +786,8 @@ struct ExitPlanModeView: View {
                 }
                 .buttonStyle(.plain)
             }
+
+            ShortcutHintBar()
         }
         .padding(8)
         .padding(tailSide.paddingEdge, OverlayStyle.tailHeight)
@@ -1000,6 +1015,8 @@ struct PermissionPromptView: View {
                     .buttonStyle(.plain)
                 }
             }
+
+            ShortcutHintBar()
         }
         .padding(8)
         .padding(tailSide.paddingEdge, OverlayStyle.tailHeight)
@@ -1192,6 +1209,7 @@ struct PermissionStackView: View {
                         .transition(.move(edge: .top).combined(with: .opacity))
                     }
                 }
+
             }
             .animation(.easeInOut(duration: 0.15), value: hotkeyManager.isCmdHeld)
             .animation(.easeInOut(duration: 0.15), value: hotkeyManager.selectedButtonIndex)

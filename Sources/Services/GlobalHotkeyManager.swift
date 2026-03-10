@@ -10,6 +10,9 @@ final class HotkeySharedState: @unchecked Sendable {
     /// Whether pending permissions exist — controls Cmd+1-9 interception.
     var hasPendingPermissions = false
 
+    /// Whether a session-finished toast is visible — controls Cmd+Enter interception.
+    var hasSessionFinishedToast = false
+
     /// Number of active sessions.
     var activeSessionCount: Int32 = 0
 
@@ -470,7 +473,7 @@ private func globalHotkeyCallback(
                 DispatchQueue.main.async { manager.onSessionSwitcherConfirm?() }
                 return nil
             }
-            if state.hasPendingPermissions {
+            if state.hasPendingPermissions || state.hasSessionFinishedToast {
                 DispatchQueue.main.async { manager.onConfirmPermission?() }
                 return nil
             }
