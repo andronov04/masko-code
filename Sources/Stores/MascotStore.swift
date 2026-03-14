@@ -22,7 +22,7 @@ final class MascotStore {
     private(set) var mascots: [SavedMascot] = []
     private static let filename = "mascots.json"
 
-    private static let seedVersion = 6 // Bump to re-apply default config on next launch
+    private static let seedVersion = 7 // Bump to re-apply default config on next launch
 
     /// The base mascot presets. Replace placeholder entries with real configs when ready.
     static let presets: [PresetInfo] = [
@@ -32,6 +32,7 @@ final class MascotStore {
         PresetInfo(slug: "masko", filename: "masko"),
         PresetInfo(slug: "rusty", filename: "rusty"),
         PresetInfo(slug: "nugget", filename: "nugget"),
+        PresetInfo(slug: "clippy", filename: "clippy"),
     ]
 
     /// Presets not yet added by the user.
