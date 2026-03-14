@@ -19,6 +19,10 @@ final class AppStore {
     private(set) var isRunning = false
     private var lastReconcileDate: Date = .distantPast
 
+    /// Cached IDE detection results — survives across SettingsView recreations.
+    /// Updated by SettingsView.task and install/uninstall actions.
+    var cachedIDEStatuses: [ExtensionInstaller.IDEStatus] = []
+
     /// Called when a Claude Code event is received — wire to OverlayManager.handleEvent
     var onEventForOverlay: ((ClaudeEvent) -> Void)?
     /// Called when a custom input is received via POST /input

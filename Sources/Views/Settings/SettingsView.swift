@@ -336,11 +336,28 @@ struct SettingsView: View {
         .scrollContentBackground(.hidden)
         .background(Constants.lightBackground)
         .navigationTitle("Settings")
-        .onAppear {
+        .task {
+            // Fast, synchronous — safe on main thread
             isHookEnabled = HookInstaller.isRegistered()
             videoCacheSize = VideoCache.shared.cacheSize
-            refreshIDEStatuses()
             portText = String(appStore.localServer.port)
+
+            // Show cached IDE statuses immediately (no flash on repeat visits)
+            if !appStore.cachedIDEStatuses.isEmpty {
+                ideStatuses = appStore.cachedIDEStatuses
+                ideExtensionInstalled = ideStatuses.contains { $0.isInstalled }
+            }
+
+            // Refresh in background — updates cache for next visit
+            let statuses = await withCheckedContinuation { continuation in
+                DispatchQueue.global(qos: .userInitiated).async {
+                    continuation.resume(returning: ExtensionInstaller.allIDEStatuses())
+                }
+            }
+            guard !Task.isCancelled else { return }
+            ideStatuses = statuses
+            ideExtensionInstalled = statuses.contains { $0.isInstalled }
+            appStore.cachedIDEStatuses = statuses
         }
         .alert("Uninstall Masko?", isPresented: $showUninstallConfirm) {
             Button("Cancel", role: .cancel) {}
@@ -405,6 +422,7 @@ struct SettingsView: View {
                 DispatchQueue.main.async {
                     ideStatuses = statuses
                     ideExtensionInstalled = statuses.contains { $0.isInstalled }
+                    appStore.cachedIDEStatuses = statuses
                     ideExtensionEnabled = true
                     extensionBusy = false
                     ExtensionInstaller.triggerPermissionPrompt()
@@ -429,6 +447,7 @@ struct SettingsView: View {
                 DispatchQueue.main.async {
                     ideStatuses = statuses
                     ideExtensionInstalled = statuses.contains { $0.isInstalled }
+                    appStore.cachedIDEStatuses = statuses
                     ideExtensionEnabled = true
                     installingIDE = nil
                     ExtensionInstaller.triggerPermissionPrompt()
@@ -451,6 +470,7 @@ struct SettingsView: View {
             DispatchQueue.main.async {
                 ideStatuses = statuses
                 ideExtensionInstalled = false
+                appStore.cachedIDEStatuses = statuses
                 ideExtensionEnabled = false
                 extensionBusy = false
             }
