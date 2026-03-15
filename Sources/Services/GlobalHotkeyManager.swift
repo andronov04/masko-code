@@ -62,6 +62,7 @@ final class GlobalHotkeyManager {
 
     /// True when the CGEvent tap is active (Accessibility permission granted).
     private(set) var isActive = false
+    private(set) var isAccessibilityTrusted = AXIsProcessTrusted()
 
     // MARK: - Unified callbacks (routed by activeCard priority)
 
@@ -212,6 +213,15 @@ final class GlobalHotkeyManager {
     func start() {
         guard shared.eventTap == nil else { return }
 
+        let trusted = AXIsProcessTrusted()
+        isAccessibilityTrusted = trusted
+        guard trusted else {
+            Self.debugLog("start skipped — AXIsProcessTrusted=false")
+            print("[masko-desktop] Global hotkey manager not started — AXIsProcessTrusted=false")
+            isActive = false
+            return
+        }
+
         // Sync UserDefaults → shared state
         shared.keyCode = hotkeyKeyCode
         shared.modifiersRaw = hotkeyModifiers.rawValue
@@ -232,10 +242,10 @@ final class GlobalHotkeyManager {
             userInfo: refcon
         ) else {
             let trusted = AXIsProcessTrusted()
+            isAccessibilityTrusted = trusted
             Self.debugLog("CGEvent tap FAILED — AXIsProcessTrusted=\(trusted)")
             print("[masko-desktop] CGEvent tap failed — AXIsProcessTrusted=\(trusted)")
             isActive = false
-            requestAccessibilityPermission()
             return
         }
 
@@ -267,6 +277,7 @@ final class GlobalHotkeyManager {
     func requestAccessibilityPermission() {
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary
         let trusted = AXIsProcessTrustedWithOptions(options)
+        isAccessibilityTrusted = trusted
         if trusted && shared.eventTap == nil {
             start()
         }

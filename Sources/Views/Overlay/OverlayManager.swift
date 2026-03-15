@@ -17,14 +17,26 @@ final class TransparentHostingController<Content: View>: NSHostingController<Con
 @MainActor
 @Observable
 final class OverlayManager {
+    private let islandHeaderPanelSize = CGSize(width: 30, height: 34)
+    private let islandExpandedSlideOffset: CGFloat = 12
+
     private(set) var isOverlayActive = false
     private(set) var currentURL: URL?
     private(set) var currentConfig: MaskoAnimationConfig?
     private(set) var currentStateMachine: OverlayStateMachine?
+    private(set) var displayMode: OverlayDisplayMode = .stored
     private var panel: OverlayPanel?           // Mascot video — fixed size
     private var statsPanel: OverlayPanel?      // Stats/debug — fixed directly above mascot
+    private var islandTopBarController: TransparentHostingController<OverlayIslandTopBarView>?
+    private var islandExpandedController: TransparentHostingController<AnyView>?
     private var permissionPanel: OverlayPanel? // Permission prompts — smart-positioned
     private var permissionHUDConfig = PermissionHUDConfig()
+    private var islandHUDConfig = IslandHUDConfig()
+    private var islandInteractionState = IslandInteractionState()
+    private var islandStatsSize: CGSize = CGSize(width: 28, height: 20)
+    private var islandTopBarSize: CGSize = CGSize(width: 120, height: 28)
+    private var islandStatsSnapshot = CompactStatsPillSnapshot(activeCount: 0, subagentCount: 0, compactCount: 0, pendingCount: 0, runningCount: 0)
+    private var islandAnchorLeftX: CGFloat?
     private var workspaceObservers: [NSObjectProtocol] = []
 
     // Overlay enabled/disabled (notification-only mode)
@@ -43,6 +55,8 @@ final class OverlayManager {
     // Coalescing flag for HUD repositioning — prevents recursive layout cycles
     private var hudRepositionScheduled = false
 
+    private var isIslandDisplayMode: Bool { displayMode == .island }
+
     // Stores passed from AppStore for overlay display
     // Non-optional with defaults — avoids @Environment crash when overlay renders before stores are set
     var sessionStore: SessionStore = SessionStore()
@@ -59,7 +73,29 @@ final class OverlayManager {
         }
         set {
             UserDefaults.standard.set(newValue, forKey: "overlay_size")
-            resizePanelToPixels(newValue)
+            if !isIslandDisplayMode {
+                resizePanelToPixels(newValue)
+            }
+        }
+    }
+
+    func setDisplayMode(_ mode: OverlayDisplayMode) {
+        guard displayMode != mode else { return }
+        displayMode = mode
+        UserDefaults.standard.set(mode.rawValue, forKey: OverlayDisplayMode.userDefaultsKey)
+
+        guard isOverlayEnabled else { return }
+        let config = currentConfig
+        let url = currentURL
+        let wasActive = isOverlayActive
+
+        if wasActive {
+            hideOverlay(clearConfig: false)
+            if let config {
+                showOverlayWithConfig(config)
+            } else if let url {
+                showOverlay(url: url)
+            }
         }
     }
 
@@ -74,6 +110,12 @@ final class OverlayManager {
 
         // Close existing
         hideOverlay()
+
+        if isIslandDisplayMode {
+            currentURL = url
+            showIslandOverlay(loopURL: url)
+            return
+        }
 
         let px = currentSizePixels
         let size = CGSize(width: px, height: px)
@@ -157,6 +199,11 @@ final class OverlayManager {
         let sm = OverlayStateMachine(config: config)
         self.currentStateMachine = sm
         sm.start()
+
+        if isIslandDisplayMode {
+            showIslandOverlay(loopURL: nil)
+            return
+        }
 
         // --- Mascot panel (fixed size, just the video) ---
         let px = currentSizePixels
@@ -294,9 +341,128 @@ final class OverlayManager {
         workspaceObservers.append(moveObserver)
     }
 
+    private func showIslandOverlay(loopURL: URL?) {
+        let screen = NSScreen.main
+
+        islandHUDConfig = IslandHUDConfig()
+        islandHUDConfig.permissionConfig.layoutStyle = .island
+        islandHUDConfig.permissionConfig.maxWidth = 400
+        islandInteractionState = IslandInteractionState()
+        islandStatsSnapshot = currentIslandStatsSnapshot()
+        islandStatsSize = measuredIslandStatsSize()
+        let notchGap = islandTopGap(on: screen ?? NSScreen.main ?? NSScreen.screens.first)
+        islandTopBarSize = measuredIslandTopBarSize(notchGap: notchGap)
+        islandHUDConfig.compactWidth = islandTopBarSize.width
+        islandAnchorLeftX = nil
+        islandHUDConfig.onContentSizeChange = { [weak self] _ in
+            self?.scheduleHUDReposition()
+        }
+        islandInteractionState.onChange = { [weak self] in self?.scheduleHUDReposition() }
+
+        let topBarView = OverlayIslandTopBarView(
+            interactionState: islandInteractionState,
+            stateMachine: currentStateMachine,
+            loopURL: loopURL,
+            snapshot: islandStatsSnapshot,
+            sessionStore: sessionStore,
+            notchGap: notchGap,
+            pendingCount: pendingPermissionStore.count,
+            barHeight: islandHeaderPanelSize.height
+        )
+
+        let initialOrigin = islandTopBarOrigin(
+            for: islandTopBarSize,
+            screen: screen ?? NSScreen.main ?? NSScreen.screens.first
+        )
+
+        let islandPanel = OverlayPanel(contentRect: NSRect(origin: initialOrigin, size: islandTopBarSize))
+        islandPanel.isMovableByWindowBackground = false
+
+        let controller = TransparentHostingController(rootView: topBarView)
+        islandPanel.contentView = controller.view
+        islandPanel.contentViewController = controller
+        islandTopBarController = controller
+
+        islandPanel.onRightClick = { [weak self] point in self?.showContextMenu(at: point) }
+
+        let savedOpacity = UserDefaults.standard.double(forKey: "overlay_opacity")
+        islandPanel.alphaValue = savedOpacity > 0 ? savedOpacity : 1.0
+
+        pendingPermissionStore.onPendingChange = { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                self?.scheduleHUDReposition()
+            }
+        }
+
+        pendingPermissionStore.onRequestTextInputFocus = { [weak self] in
+            guard let self, let permissionPanel = self.permissionPanel else { return }
+            self.islandInteractionState.isPinned = true
+            NSApp.activate(ignoringOtherApps: true)
+            permissionPanel.makeKey()
+            self.scheduleHUDReposition()
+        }
+
+        islandPanel.orderFrontRegardless()
+        SkyLightOperator.shared.delegateWindow(islandPanel)
+
+        self.panel = islandPanel
+        self.statsPanel = nil
+
+        let expandedView = AnyView(
+            OverlayIslandExpandedView(
+                config: islandHUDConfig,
+                interactionState: islandInteractionState,
+                availableWidth: islandTopBarSize.width
+            )
+            .environment(pendingPermissionStore)
+            .environment(hotkeyManager)
+            .environment(sessionSwitcherStore)
+            .environment(sessionStore)
+            .environment(sessionFinishedStore)
+        )
+
+        let expandedPanel = OverlayPanel(contentRect: NSRect(
+            origin: CGPoint(x: initialOrigin.x, y: initialOrigin.y - 160),
+            size: islandHUDConfig.contentSize
+        ))
+        expandedPanel.isMovableByWindowBackground = false
+        expandedPanel.onRightClick = { [weak self] point in self?.showContextMenu(at: point) }
+        expandedPanel.alphaValue = savedOpacity > 0 ? savedOpacity : 1.0
+        let expandedController = TransparentHostingController(rootView: expandedView)
+        expandedPanel.contentView = expandedController.view
+        expandedPanel.contentViewController = expandedController
+        islandExpandedController = expandedController
+        expandedPanel.orderOut(nil)
+        self.permissionPanel = expandedPanel
+
+        self.currentURL = loopURL
+        self.isOverlayActive = true
+
+        setupObservers(for: islandPanel)
+
+        let resignObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didResignKeyNotification,
+            object: expandedPanel,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.islandInteractionState.isPinned = false
+                self.scheduleHUDReposition()
+            }
+        }
+        workspaceObservers.append(resignObserver)
+
+        scheduleHUDReposition()
+    }
+
     /// Recompute aggregate session state and push inputs to the state machine.
     /// Can be called independently (e.g. after interrupt detection) without needing an event.
     func refreshInputs() {
+        if isIslandDisplayMode {
+            scheduleHUDReposition()
+        }
+
         guard let sm = currentStateMachine else { return }
 
         let active = sessionStore.activeSessions
@@ -392,10 +558,14 @@ final class OverlayManager {
         dismissSessionSwitcher()
         permissionPanel?.close()
         permissionPanel = nil
+        islandTopBarController = nil
+        islandExpandedController = nil
         statsPanel?.close()
         statsPanel = nil
         panel?.close()
         panel = nil
+        islandHUDConfig = IslandHUDConfig()
+        islandAnchorLeftX = nil
         currentURL = nil
         currentConfig = nil
         currentStateMachine = nil
@@ -439,6 +609,8 @@ final class OverlayManager {
         dismissSessionSwitcher()
         permissionPanel?.close()
         permissionPanel = nil
+        islandTopBarController = nil
+        islandExpandedController = nil
         statsPanel?.close()
         statsPanel = nil
         panel?.close()
@@ -678,13 +850,17 @@ final class OverlayManager {
     func setDialogScale(_ scale: Double) {
         permissionHUDConfig.scale = CGFloat(scale)
         permissionHUDConfig.updateScaledSize()
+        islandHUDConfig.permissionConfig.scale = CGFloat(scale)
+        islandHUDConfig.permissionConfig.updateScaledSize()
         scheduleHUDReposition()
     }
 
     /// Show/hide the preview dialog for scale adjustment.
     func setDialogPreview(_ show: Bool) {
         permissionHUDConfig.showPreview = show
+        islandHUDConfig.permissionConfig.showPreview = show
         permissionPanel?.orderFrontRegardless()
+        panel?.orderFrontRegardless()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { self.scheduleHUDReposition() }
     }
 
@@ -779,6 +955,7 @@ final class OverlayManager {
         // The SessionSwitcherView lives inside the permission panel.
         // Ensure the panel is visible and re-sync after SwiftUI renders.
         permissionPanel?.orderFrontRegardless()
+        panel?.orderFrontRegardless()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { self.scheduleHUDReposition() }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { self.scheduleHUDReposition() }
     }
@@ -794,6 +971,7 @@ final class OverlayManager {
 
     func repositionForToast() {
         permissionPanel?.orderFrontRegardless()
+        panel?.orderFrontRegardless()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { self.scheduleHUDReposition() }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self.scheduleHUDReposition() }
     }
@@ -859,6 +1037,9 @@ final class OverlayManager {
         guard let panel else { return }
         panel.level = .screenSaver
         panel.orderFrontRegardless()
+        if isIslandDisplayMode {
+            return
+        }
         if let statsPanel {
             statsPanel.level = .screenSaver
             statsPanel.orderFrontRegardless()
@@ -921,6 +1102,198 @@ final class OverlayManager {
             statsPanel.setFrameOrigin(CGPoint(x: x, y: y))
         }
         // Standalone mode: stats stay at their initial position
+    }
+
+    private func syncIslandPanel() {
+        guard isIslandDisplayMode, let panel else { return }
+
+        let screen = panel.screen ?? NSScreen.main ?? NSScreen.screens.first
+        let notchGap = islandTopGap(on: screen)
+        let currentStatsSnapshot = currentIslandStatsSnapshot()
+        let didChangePills = currentStatsSnapshot != islandStatsSnapshot
+        islandStatsSnapshot = currentStatsSnapshot
+        islandStatsSize = measuredIslandStatsSize()
+        islandTopBarSize = measuredIslandTopBarSize(notchGap: notchGap)
+        islandHUDConfig.compactWidth = islandTopBarSize.width
+        if didChangePills || islandTopBarController == nil {
+            islandTopBarController?.rootView = OverlayIslandTopBarView(
+                interactionState: islandInteractionState,
+                stateMachine: currentStateMachine,
+                loopURL: currentURL,
+                snapshot: islandStatsSnapshot,
+                sessionStore: sessionStore,
+                notchGap: notchGap,
+                pendingCount: pendingPermissionStore.count,
+                barHeight: islandHeaderPanelSize.height
+            )
+        }
+        let topBarOrigin = islandTopBarOrigin(
+            for: islandTopBarSize,
+            screen: screen
+        )
+        let topBarFrame = NSRect(origin: topBarOrigin, size: islandTopBarSize)
+        setIslandTopPanelFrame(panel, to: topBarFrame, animated: !didChangePills)
+        islandExpandedController?.rootView = AnyView(
+            OverlayIslandExpandedView(
+                config: islandHUDConfig,
+                interactionState: islandInteractionState,
+                availableWidth: topBarFrame.width
+            )
+            .environment(pendingPermissionStore)
+            .environment(hotkeyManager)
+            .environment(sessionSwitcherStore)
+            .environment(sessionStore)
+            .environment(sessionFinishedStore)
+        )
+
+        guard let expandedPanel = permissionPanel else { return }
+        let shouldShowExpanded = islandInteractionState.isExpanded || islandInteractionState.isPinned
+        if !shouldShowExpanded {
+            if expandedPanel.isVisible {
+                let currentFrame = expandedPanel.frame
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = 0.2
+                    context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                    expandedPanel.animator().alphaValue = 0
+                    expandedPanel.animator().setFrameOrigin(CGPoint(
+                        x: currentFrame.origin.x,
+                        y: currentFrame.origin.y + islandExpandedSlideOffset
+                    ))
+                } completionHandler: {
+                    expandedPanel.orderOut(nil)
+                }
+            }
+            return
+        }
+
+        let expandedSize = islandHUDConfig.contentSize
+        let expandedFrame = islandExpandedFrame(
+            expandedContentSize: expandedSize,
+            topBarFrame: topBarFrame
+        )
+        if !expandedPanel.isVisible {
+            expandedPanel.alphaValue = 0
+            expandedPanel.setFrame(
+                NSRect(
+                    origin: CGPoint(
+                        x: expandedFrame.origin.x,
+                        y: expandedFrame.origin.y + islandExpandedSlideOffset
+                    ),
+                    size: expandedFrame.size
+                ),
+                display: false
+            )
+            expandedPanel.orderFrontRegardless()
+            SkyLightOperator.shared.delegateWindow(expandedPanel)
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.22
+                context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                expandedPanel.animator().alphaValue = 1
+                expandedPanel.animator().setFrame(expandedFrame, display: true)
+            }
+        } else {
+            expandedPanel.alphaValue = 1
+            if didChangePills {
+                expandedPanel.setFrame(expandedFrame, display: true)
+            } else {
+                animateIslandPanel(expandedPanel, to: expandedFrame)
+            }
+        }
+    }
+
+    private func animateIslandPanel(_ panel: OverlayPanel, to newFrame: NSRect) {
+        let currentFrame = panel.frame
+
+        guard abs(currentFrame.origin.x - newFrame.origin.x) > 0.5 ||
+              abs(currentFrame.origin.y - newFrame.origin.y) > 0.5 ||
+              abs(currentFrame.size.width - newFrame.size.width) > 0.5 ||
+              abs(currentFrame.size.height - newFrame.size.height) > 0.5 else {
+            return
+        }
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.08
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            panel.animator().setFrame(newFrame, display: true)
+        }
+    }
+
+    private func setIslandTopPanelFrame(_ panel: OverlayPanel, to newFrame: NSRect, animated: Bool) {
+        if animated {
+            animateIslandPanel(panel, to: newFrame)
+        } else {
+            panel.setFrame(newFrame, display: true, animate: false)
+        }
+    }
+
+    private func measuredIslandStatsSize() -> CGSize {
+        let rootView = OverlayIslandStatsPillView(
+            interactionState: islandInteractionState,
+            snapshot: islandStatsSnapshot,
+            sessionStore: sessionStore
+        )
+        let hostingView = NSHostingView(rootView: rootView)
+        hostingView.layoutSubtreeIfNeeded()
+        let size = hostingView.fittingSize
+        return CGSize(
+            width: max(28, ceil(size.width)),
+            height: max(20, ceil(size.height))
+        )
+    }
+
+    private func currentIslandStatsSnapshot() -> CompactStatsPillSnapshot {
+        CompactStatsPillSnapshot(sessionStore: sessionStore, pendingCount: pendingPermissionStore.count)
+    }
+
+    private func islandNotchWidth(on screen: NSScreen) -> CGFloat? {
+        guard let leftArea = screen.auxiliaryTopLeftArea,
+              let rightArea = screen.auxiliaryTopRightArea else {
+            return nil
+        }
+
+        let width = rightArea.minX - leftArea.maxX
+        return width > 0 ? width : nil
+    }
+
+    private func islandTopGap(on screen: NSScreen?) -> CGFloat {
+        guard let screen else { return 160 }
+        return islandNotchWidth(on: screen) ?? 160
+    }
+
+    private func measuredIslandTopBarSize(notchGap: CGFloat) -> CGSize {
+        CGSize(
+            width: ceil(30 + notchGap + islandStatsSize.width),
+            height: islandHeaderPanelSize.height
+        )
+    }
+
+    private func islandTopBarOrigin(for size: CGSize, screen: NSScreen?) -> CGPoint {
+        guard let screen else { return .zero }
+
+        if let leftArea = screen.auxiliaryTopLeftArea,
+           screen.auxiliaryTopRightArea != nil {
+            let x = leftArea.maxX - 27
+            let y = screen.frame.maxY - size.height + 2
+            return CGPoint(x: x, y: y)
+        }
+
+        let visibleFrame = screen.visibleFrame
+        return CGPoint(
+            x: max(visibleFrame.minX + 12, min(visibleFrame.midX - size.width - 24, visibleFrame.maxX - size.width - 12)),
+            y: max(visibleFrame.minY + 12, visibleFrame.maxY - size.height - 8)
+        )
+    }
+
+    private func islandExpandedFrame(
+        expandedContentSize: CGSize,
+        topBarFrame: NSRect
+    ) -> NSRect {
+        NSRect(
+            x: topBarFrame.origin.x,
+            y: topBarFrame.origin.y - expandedContentSize.height + 7.5,
+            width: topBarFrame.width,
+            height: expandedContentSize.height
+        )
     }
 
     /// Measure permission content, resize panel, and smart-position it.
@@ -1038,12 +1411,17 @@ final class OverlayManager {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.hudRepositionScheduled = false
-            self.repositionStats()
-            self.syncPermissionPanel()
+            if self.isIslandDisplayMode {
+                self.syncIslandPanel()
+            } else {
+                self.repositionStats()
+                self.syncPermissionPanel()
+            }
         }
     }
 
     private func savePosition() {
+        guard !isIslandDisplayMode else { return }
         guard let panel else { return }
         UserDefaults.standard.set(panel.frame.origin.x, forKey: "overlay_x")
         UserDefaults.standard.set(panel.frame.origin.y, forKey: "overlay_y")

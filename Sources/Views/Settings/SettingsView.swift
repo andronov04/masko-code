@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(AppStore.self) var appStore
+    @Environment(OverlayManager.self) var overlayManager
     @Environment(AppUpdater.self) var appUpdater
     @State private var isHookEnabled = false
     @State private var hookError: String?
@@ -12,6 +13,8 @@ struct SettingsView: View {
     @State private var ideExtensionInstalled = false
     @State private var ideStatuses: [ExtensionInstaller.IDEStatus] = []
     @AppStorage("ideExtensionEnabled") private var ideExtensionEnabled = true
+    @AppStorage(OverlayDisplayMode.userDefaultsKey) private var overlayDisplayModeRaw = OverlayDisplayMode.classic.rawValue
+    @AppStorage(AppDelegate.menuBarExtraVisibilityKey) private var showsMenuBarExtra = true
     @State private var extensionError: String?
     @State private var extensionBusy = false
     @State private var installingIDE: String?  // command of IDE currently being installed
@@ -103,15 +106,45 @@ struct SettingsView: View {
             }
 
             Section {
+                Picker("Layout", selection: $overlayDisplayModeRaw) {
+                    ForEach(OverlayDisplayMode.allCases) { mode in
+                        Text(mode.title).tag(mode.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text(overlayDisplayMode == .classic
+                    ? "Classic keeps the floating mascot and speech bubble panels."
+                    : "Island pins a compact mascot at the top center and expands prompts on hover.")
+                    .font(.system(size: 11))
+                    .foregroundColor(Constants.textMuted)
+            } header: {
+                Text("Overlay").font(Constants.heading(size: 13, weight: .semibold))
+            }
+
+            Section {
+                Toggle("Show menu bar icon", isOn: $showsMenuBarExtra)
+                    .foregroundColor(Constants.textPrimary)
+
+                Text(showsMenuBarExtra
+                    ? "Masko stays in the macOS menu bar and can hide from the Dock when windows are closed."
+                    : "Masko hides the menu bar icon and stays visible in the Dock instead.")
+                    .font(.system(size: 11))
+                    .foregroundColor(Constants.textMuted)
+            } header: {
+                Text("Menu Bar").font(Constants.heading(size: 13, weight: .semibold))
+            }
+
+            Section {
                 HStack {
                     Text("Global Shortcuts")
                         .foregroundColor(Constants.textPrimary)
                     Spacer()
                     HStack(spacing: 6) {
                         Circle()
-                            .fill(appStore.hotkeyManager.isActive ? Color.green : Color.gray.opacity(0.4))
+                            .fill(appStore.hotkeyManager.isActive ? Color.green : (appStore.hotkeyManager.isAccessibilityTrusted ? Constants.orangePrimary : Color.gray.opacity(0.4)))
                             .frame(width: 8, height: 8)
-                        Text(appStore.hotkeyManager.isActive ? "Active" : "Needs Accessibility")
+                        Text(appStore.hotkeyManager.isActive ? "Active" : (appStore.hotkeyManager.isAccessibilityTrusted ? "Restart shortcut capture" : "Needs Accessibility"))
                             .foregroundColor(Constants.textMuted)
                     }
                 }
@@ -130,11 +163,23 @@ struct SettingsView: View {
                 .padding(.vertical, 2)
 
                 if !appStore.hotkeyManager.isActive {
-                    Button("Grant Accessibility Permission") {
-                        appStore.hotkeyManager.requestAccessibilityPermission()
+                    VStack(alignment: .leading, spacing: 6) {
+                        Button(appStore.hotkeyManager.isAccessibilityTrusted ? "Retry Accessibility Capture" : "Grant Accessibility Permission") {
+                            if appStore.hotkeyManager.isAccessibilityTrusted {
+                                appStore.hotkeyManager.start()
+                            } else {
+                                appStore.hotkeyManager.requestAccessibilityPermission()
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundColor(Constants.orangePrimary)
+
+                        if appStore.hotkeyManager.isAccessibilityTrusted {
+                            Text("macOS has approved the app, but the event tap is not active yet. Retry once, or relaunch the app if capture still does not start.")
+                                .font(.system(size: 11))
+                                .foregroundColor(Constants.textMuted)
+                        }
                     }
-                    .buttonStyle(.plain)
-                    .foregroundColor(Constants.orangePrimary)
                 }
             } header: {
                 Text("Keyboard Shortcuts").font(Constants.heading(size: 13, weight: .semibold))
@@ -349,6 +394,13 @@ struct SettingsView: View {
         .scrollContentBackground(.hidden)
         .background(Constants.lightBackground)
         .navigationTitle("Settings")
+        .onChange(of: overlayDisplayModeRaw) { _, newValue in
+            let mode = OverlayDisplayMode(rawValue: newValue) ?? .classic
+            overlayManager.setDisplayMode(mode)
+        }
+        .onChange(of: showsMenuBarExtra) { _, _ in
+            AppDelegate.refreshPresentationMode()
+        }
         .task {
             // Fast, synchronous — safe on main thread
             isHookEnabled = HookInstaller.isRegistered()
@@ -378,6 +430,10 @@ struct SettingsView: View {
         } message: {
             Text("This will remove Claude Code hooks, delete all local data, and quit the app. You can reinstall anytime.")
         }
+    }
+
+    private var overlayDisplayMode: OverlayDisplayMode {
+        OverlayDisplayMode(rawValue: overlayDisplayModeRaw) ?? .classic
     }
 
     private func applyPort() {

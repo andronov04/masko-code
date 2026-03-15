@@ -27,7 +27,7 @@
 
 | | Feature | Description |
 |---|---|---|
-| 🎭 | **Animated overlay** | A mascot that floats above all windows and reacts to Claude Code state — click or hover to interact |
+| 🎭 | **Animated overlay** | A mascot that floats above all windows or lives in a compact island layout and reacts to Claude Code state |
 | 🔐 | **Permission handling** | Approve, deny, or defer tool use requests from a speech bubble — select with `⌘1-9`, permissions stack in a queue |
 | 💬 | **Question answering** | Answer Claude's questions directly from the overlay |
 | 📋 | **Plan review** | Review and approve plans without opening your terminal |
@@ -80,6 +80,8 @@ The focus toggle shortcut can be rebound to any key combination in Settings.
 
 Right-click the mascot to open the **context menu** — snooze, resize, or close the overlay.
 
+In **Settings → Overlay**, you can switch between the default **Classic** layout and the new **Island** mode.
+
 ## Custom Mascots
 
 The default Masko fox is included. Want your own character? Create one on [masko.ai](https://masko.ai) with AI-generated animations for every state (idle, working, attention). Export and load it into the desktop app in one click.
@@ -115,6 +117,18 @@ swift build
 swift run
 ```
 
+## Local Dev App
+
+For macOS permissions like Accessibility and Notifications, use a stable `.app` bundle instead of running the raw debug executable.
+
+```bash
+cd /Users/andronov04/projects/sandbox/projects/masko-code
+./scripts/build-dev-app.sh
+open "dist/Masko Code.app"
+```
+
+Grant permissions to `dist/Masko Code.app` once in System Settings. After that, keep rebuilding in Xcode normally; the app bundle path stays the same, so you should not need to reinstall it after each code change.
+
 ## Project Structure
 
 ```
@@ -137,3 +151,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for how to get involved.
 ## License
 
 [MIT License](LICENSE) — Copyright (c) 2026 Masko.
+
+cd /Users/andronov04/projects/sandbox/projects/masko-code
+MASKO_CODESIGN_IDENTITY="Apple Development: Andrey Andronov (FUY634M4LC)" ./scripts/build-dev-app.sh
+open "/Users/andronov04/projects/sandbox/projects/masko-code/dist/Masko Code.app"

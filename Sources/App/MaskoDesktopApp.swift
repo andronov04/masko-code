@@ -4,12 +4,17 @@ import CoreText
 import Sparkle
 
 class AppDelegate: NSObject, NSApplicationDelegate {
+    static let menuBarExtraVisibilityKey = "menu_bar_extra_enabled"
+
     private var closeObserver: Any?
 
     func applicationWillFinishLaunching(_ notification: Notification) {
-        // Menu bar only — no dock icon
-        NSApp.setActivationPolicy(.accessory)
-        UserDefaults.standard.register(defaults: ["overlay_enabled": true])
+        UserDefaults.standard.register(defaults: [
+            "overlay_enabled": true,
+            OverlayDisplayMode.userDefaultsKey: OverlayDisplayMode.classic.rawValue,
+            Self.menuBarExtraVisibilityKey: true
+        ])
+        Self.refreshPresentationMode()
         registerBundledFonts()
     }
 
@@ -70,7 +75,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     queue: .main
                 ) { [weak appDelegate] _ in
                     appDelegate?.closeObserver = nil
-                    NSApp.setActivationPolicy(.accessory)
+                    AppDelegate.refreshPresentationMode()
                 }
             }
         }
@@ -78,10 +83,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// When all windows close, go back to menu bar only
     func applicationDidResignActive(_ notification: Notification) {
-        // Only count real windows — overlay panels don't count
+        Self.refreshPresentationMode()
+    }
+
+    static var isMenuBarExtraEnabled: Bool {
+        UserDefaults.standard.object(forKey: menuBarExtraVisibilityKey) as? Bool ?? true
+    }
+
+    static func refreshPresentationMode() {
         let hasVisibleWindows = NSApp.windows.contains { $0.isVisible && $0.canBecomeKey && !($0 is NSPanel) }
-        if !hasVisibleWindows {
-            NSApp.setActivationPolicy(.accessory)
+        if isMenuBarExtraEnabled {
+            NSApp.setActivationPolicy(hasVisibleWindows ? .regular : .accessory)
+        } else {
+            NSApp.setActivationPolicy(.regular)
         }
     }
 }
@@ -134,6 +148,7 @@ struct MaskoDesktopApp: App {
     @State private var appStore = AppStore()
     @State private var overlayManager = OverlayManager()
     @State private var appUpdater = AppUpdater()
+    @AppStorage(AppDelegate.menuBarExtraVisibilityKey) private var showsMenuBarExtra = true
 
     var body: some Scene {
         // Main dashboard window (shown on launch)
@@ -182,8 +197,7 @@ struct MaskoDesktopApp: App {
         }
         .defaultSize(width: 1000, height: 700)
 
-        // Menu bar — always visible, primary entry point
-        MenuBarExtra {
+        MenuBarExtra(isInserted: $showsMenuBarExtra) {
             MenuBarView()
                 .environment(appStore)
                 .environment(overlayManager)

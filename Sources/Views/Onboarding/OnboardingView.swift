@@ -94,7 +94,7 @@ struct OnboardingView: View {
                     .foregroundStyle(Constants.textMuted)
             }
 
-            Text("Masko lives on your screen, reacts to Claude Code activity, and lets you approve actions without switching windows.")
+            Text("Masko lives on your screen, reacts to Claude Code activity, and lets you approve actions without switching windows. You can keep the classic floating mascot or switch to the new island layout later.")
                 .font(Constants.body(size: 14))
                 .foregroundStyle(Constants.textMuted)
                 .multilineTextAlignment(.center)
@@ -198,7 +198,7 @@ struct OnboardingView: View {
                     .font(Constants.heading(size: 24, weight: .bold))
                     .foregroundStyle(Constants.textPrimary)
 
-                Text("Accept permissions with \u{2318}1, toggle focus with \u{2318}\u{21E7}M \u{2014} without switching windows.")
+                Text("Accept permissions with \u{2318}1, toggle focus with \u{2318}\u{21E7}M \u{2014} without switching windows. These shortcuts work in both classic and island layouts.")
                     .font(Constants.body(size: 14))
                     .foregroundStyle(Constants.textMuted)
                     .multilineTextAlignment(.center)
@@ -222,6 +222,13 @@ struct OnboardingView: View {
                 primaryButton("Enable Shortcuts") {
                     enableAccessibility()
                 }
+
+                Text("If macOS still does not activate shortcut capture right away after approval, close and reopen Masko once.")
+                    .font(Constants.body(size: 11))
+                    .foregroundStyle(Constants.textMuted)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 20)
 
                 skipButton { nextStep(after: 3) }
             }
@@ -300,7 +307,7 @@ struct OnboardingView: View {
                     .font(Constants.heading(size: 24, weight: .bold))
                     .foregroundStyle(Constants.textPrimary)
 
-                Text("Pick a companion that will live on your screen and react to Claude Code.")
+                Text("Pick a companion that will live on your screen and react to Claude Code, whether you keep the floating mascot or switch to island mode.")
                     .font(Constants.body(size: 14))
                     .foregroundStyle(Constants.textMuted)
                     .multilineTextAlignment(.center)

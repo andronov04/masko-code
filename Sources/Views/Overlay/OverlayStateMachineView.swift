@@ -1,6 +1,7 @@
 import SwiftUI
 import AVKit
 import AppKit
+import AVFoundation
 
 // MARK: - Mascot Video View (fixed-size panel, never moves)
 
@@ -28,6 +29,7 @@ struct OverlayStateMachineView: View {
                 isLoop: stateMachine.isLoopVideo,
                 stateMachine: stateMachine
             )
+            .onHover { stateMachine.handleMouseOver($0) }
             .onTapGesture {
                 stateMachine.handleClick()
             }
@@ -82,11 +84,18 @@ struct StatsHUDView: View {
 
 // MARK: - Permission HUD View (adaptive panel, repositions for screen edges)
 
+enum PermissionHUDLayoutStyle {
+    case bubble
+    case island
+}
+
 /// Permission prompts in a speech bubble. Lives in its own panel that adapts position.
 @Observable
 final class PermissionHUDConfig {
     var tailSide: TailSide = .bottom
     var tailPercent: CGFloat = 0.80
+    var layoutStyle: PermissionHUDLayoutStyle = .bubble
+    var maxWidth: CGFloat = 280
     var onContentSizeChange: ((CGSize) -> Void)?
     var showPreview = false
     var scale: CGFloat {
@@ -126,17 +135,44 @@ struct PermissionHUDView: View {
     @Environment(GlobalHotkeyManager.self) var hotkeyManager
     @Environment(SessionFinishedStore.self) var sessionFinishedStore
 
+    private var effectiveTailSide: TailSide {
+        config.layoutStyle == .island ? .none : config.tailSide
+    }
+
+    private var effectiveTailPercent: CGFloat {
+        config.layoutStyle == .island ? 0 : config.tailPercent
+    }
+
     var body: some View {
-        VStack(spacing: 4) {
-            if config.showPreview {
-                DialogScalePreview()
+        Group {
+            if config.layoutStyle == .island {
+                VStack(spacing: 4) {
+                    if config.showPreview && config.layoutStyle != .island {
+                        DialogScalePreview()
+                    }
+                    SessionSwitcherView()
+                    if config.layoutStyle != .island {
+                        SessionFinishedToastView()
+                    }
+                    PermissionStackView()
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                VStack(spacing: 4) {
+                    if config.showPreview && config.layoutStyle != .island {
+                        DialogScalePreview()
+                    }
+                    SessionSwitcherView()
+                    if config.layoutStyle != .island {
+                        SessionFinishedToastView()
+                    }
+                    PermissionStackView()
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: config.maxWidth)
             }
-            SessionSwitcherView()
-            SessionFinishedToastView()
-            PermissionStackView()
         }
-        .fixedSize(horizontal: false, vertical: true)
-        .frame(maxWidth: 280)
         .background(GeometryReader { geo in
             Color.clear
                 .onAppear {
@@ -154,8 +190,8 @@ struct PermissionHUDView: View {
             height: config.unscaledSize.height * config.scale,
             alignment: .topLeading
         )
-        .environment(\.speechBubbleTailSide, config.tailSide)
-        .environment(\.speechBubbleTailPercent, config.tailPercent)
+        .environment(\.speechBubbleTailSide, effectiveTailSide)
+        .environment(\.speechBubbleTailPercent, effectiveTailPercent)
     }
 }
 
@@ -414,5 +450,45 @@ struct StateMachineVideoPlayer: NSViewRepresentable {
             }
             #endif
         }
+    }
+}
+
+struct StaticVideoFrameView: View {
+    let url: URL?
+
+    @State private var image: NSImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFit()
+            } else {
+                Color.clear
+            }
+        }
+        .task(id: url) {
+            image = await generateImage(for: url)
+        }
+    }
+
+    private func generateImage(for url: URL?) async -> NSImage? {
+        guard let url else { return nil }
+
+        return await Task.detached(priority: .userInitiated) {
+            let asset = AVAsset(url: url)
+            let generator = AVAssetImageGenerator(asset: asset)
+            generator.appliesPreferredTrackTransform = true
+
+            guard let cgImage = try? generator.copyCGImage(at: .zero, actualTime: nil) else {
+                return nil
+            }
+
+            return NSImage(
+                cgImage: cgImage,
+                size: NSSize(width: cgImage.width, height: cgImage.height)
+            )
+        }.value
     }
 }
